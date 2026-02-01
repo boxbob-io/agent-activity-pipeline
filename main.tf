@@ -121,13 +121,16 @@ resource "aws_lambda_function" "s3_to_glue" {
   handler       = "s3_to_glue.handler"
   runtime       = "python3.11"
 
-  filename = data.archive_file.lambda_zip.output_path
+  # Access the first (and only) instance of the archive_file
+  filename = data.archive_file.lambda_zip[0].output_path
 
   environment {
     variables = {
       GLUE_JOB_NAME = aws_glue_job.csv_to_parquet.name
     }
   }
+
+  depends_on = [data.archive_file.lambda_zip]
 }
 
 ########################
