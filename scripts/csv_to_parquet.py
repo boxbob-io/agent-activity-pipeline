@@ -4,7 +4,11 @@ from awsglue.context import GlueContext
 from pyspark.context import SparkContext
 from pyspark.sql.functions import col, to_date, date_format
 
-args = getResolvedOptions(sys.argv, ['JOB_NAME', 'input_path', 'output_path'])
+args = getResolvedOptions(
+    sys.argv,
+    ["JOB_NAME", "s3_bucket", "s3_key", "output_path"]
+)
+input_path = f"s3://{args['s3_bucket']}/{args['s3_key']}"
 sc = SparkContext()
 glueContext = GlueContext(sc)
 spark = glueContext.spark_session
