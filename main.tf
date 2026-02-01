@@ -134,41 +134,31 @@ resource "aws_lambda_function" "update_s3_to_glue" {
 
 ########################
 # EventBridge Rule (S3 CSV Upload)
+# Assume rule already exists; import if needed
 ########################
 
-resource "aws_cloudwatch_event_rule" "s3_csv_upload" {
+data "aws_cloudwatch_event_rule" "s3_csv_upload" {
   name = "${local.project}-s3-csv-upload-${local.env}"
-
-  event_pattern = jsonencode({
-    source      = ["aws.s3"]
-    detail-type = ["Object Created"]
-    detail = {
-      bucket = { name = [data.aws_s3_bucket.bronze_bucket.bucket] }
-      object = { key = [{ suffix = ".csv" }] }
-    }
-  })
 }
 
 ########################
 # EventBridge Target → Lambda
+# Assume target already exists; import if needed
 ########################
 
-resource "aws_cloudwatch_event_target" "lambda_target" {
-  rule      = aws_cloudwatch_event_rule.s3_csv_upload.name
+data "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = data.aws_cloudwatch_event_rule.s3_csv_upload.name
   target_id = "S3ToGlueLambda"
-  arn       = data.aws_lambda_function.s3_to_glue.arn
 }
 
 ########################
 # Lambda Permission for EventBridge
+# Assume already exists; import if needed
 ########################
 
-resource "aws_lambda_permission" "allow_eventbridge" {
-  statement_id  = "AllowEventBridgeInvoke"
-  action        = "lambda:InvokeFunction"
+data "aws_lambda_permission" "allow_eventbridge" {
   function_name = data.aws_lambda_function.s3_to_glue.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.s3_csv_upload.arn
+  statement_id  = "AllowEventBridgeInvoke"
 }
 
 ########################
