@@ -20,9 +20,6 @@ provider "aws" {
 locals {
   project = "shyftoff-pipeline"
   env     = "dev"
-
-  # Check for Python files in the lambda folder
-  lambda_files = fileset("${path.module}/lambda", "**/*.py")
 }
 
 ########################
@@ -47,30 +44,6 @@ data "aws_iam_role" "glue_role" {
 
 data "aws_iam_role" "lambda_role" {
   name = "${local.project}-lambda-${local.env}"
-}
-
-########################
-# Fail-fast if Lambda folder is empty
-########################
-
-resource "null_resource" "validate_lambda" {
-  count = length(local.lambda_files) == 0 ? 1 : 0
-
-  provisioner "local-exec" {
-    command = "echo 'ERROR: Lambda folder is empty or no .py files found!' && exit 1"
-  }
-}
-
-########################
-# Archive Lambda folder
-########################
-
-data "archive_file" "lambda_zip" {
-  count       = length(local.lambda_files) > 0 ? 1 : 0
-  type        = "zip"
-  source_dir  = "${path.module}/lambda"
-  output_path = "${path.module}/lambda/s3_to_glue.zip"
-  depends_on  = [null_resource.validate_lambda]
 }
 
 ########################
@@ -109,7 +82,7 @@ resource "aws_glue_job" "csv_to_parquet" {
 }
 
 ########################
-# Lambda Function
+# Lambda Function (prebuilt ZIP)
 ########################
 
 resource "aws_lambda_function" "s3_to_glue" {
@@ -118,15 +91,14 @@ resource "aws_lambda_function" "s3_to_glue" {
   handler       = "s3_to_glue.handler"
   runtime       = "python3.11"
 
-  filename = data.archive_file.lambda_zip[0].output_path
+  # Prebuilt ZIP
+  filename = "${path.module}/lambda/s3_to_glue.zip"
 
   environment {
     variables = {
       GLUE_JOB_NAME = aws_glue_job.csv_to_parquet.name
     }
   }
-
-  depends_on = [data.archive_file.lambda_zip]
 }
 
 ########################
