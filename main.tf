@@ -88,12 +88,12 @@ resource "aws_glue_job" "csv_to_parquet" {
 # Lambda Packaging (auto-zip, fail-fast)
 ########################
 
-# Check what files exist in the lambda folder
+# Check for Python files in the lambda folder
 locals {
   lambda_files = fileset("${path.module}/lambda", "**/*.py")
 }
 
-# Fail immediately if no files found
+# Fail immediately if no Python files found
 resource "null_resource" "validate_lambda" {
   count = length(local.lambda_files) == 0 ? 1 : 0
 
@@ -102,7 +102,7 @@ resource "null_resource" "validate_lambda" {
   }
 }
 
-# Create ZIP only if files exist
+# Archive the Lambda folder into a ZIP
 data "archive_file" "lambda_zip" {
   count       = length(local.lambda_files) > 0 ? 1 : 0
   type        = "zip"
@@ -112,16 +112,59 @@ data "archive_file" "lambda_zip" {
 }
 
 ########################
+# Lambda IAM Role
+########################
+
+resource "aws_iam_role" "lambda_role" {
+  name = "${local.project}-lambda-${local.env}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "lambda_policy" {
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:StartJobRun"
+        ]
+        Resource = aws_glue_job.csv_to_parquet.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+########################
 # Lambda Function
 ########################
 
 resource "aws_lambda_function" "s3_to_glue" {
   function_name = "${local.project}-s3-to-glue-${local.env}"
-  role          = data.aws_iam_role.lambda_role.arn
+  role          = aws_iam_role.lambda_role.arn
   handler       = "s3_to_glue.handler"
   runtime       = "python3.11"
 
-  # Access the first (and only) instance of the archive_file
+  # Access the first (and only) archive_file instance
   filename = data.archive_file.lambda_zip[0].output_path
 
   environment {
@@ -130,7 +173,7 @@ resource "aws_lambda_function" "s3_to_glue" {
     }
   }
 
-  depends_on = [data.archive_file.lambda_zip]
+  depends_on = [aws_iam_role_policy.lambda_policy, data.archive_file.lambda_zip]
 }
 
 ########################
