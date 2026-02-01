@@ -85,13 +85,30 @@ resource "aws_glue_job" "csv_to_parquet" {
 }
 
 ########################
-# Lambda Packaging (auto-zip)
+# Lambda Packaging (auto-zip, fail-fast)
 ########################
 
+# Check what files exist in the lambda folder
+locals {
+  lambda_files = fileset("${path.module}/lambda", "**/*.py")
+}
+
+# Fail immediately if no files found
+resource "null_resource" "validate_lambda" {
+  count = length(local.lambda_files) == 0 ? 1 : 0
+
+  provisioner "local-exec" {
+    command = "echo 'ERROR: Lambda folder is empty or no .py files found!' && exit 1"
+  }
+}
+
+# Create ZIP only if files exist
 data "archive_file" "lambda_zip" {
+  count       = length(local.lambda_files) > 0 ? 1 : 0
   type        = "zip"
   source_dir  = "${path.module}/lambda"
   output_path = "${path.module}/lambda/s3_to_glue.zip"
+  depends_on  = [null_resource.validate_lambda]
 }
 
 ########################
