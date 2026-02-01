@@ -20,6 +20,9 @@ provider "aws" {
 locals {
   project = "shyftoff-pipeline"
   env     = "dev"
+
+  # Check for Python files in the lambda folder
+  lambda_files = fileset("${path.module}/lambda", "**/*.py")
 }
 
 ########################
@@ -42,11 +45,32 @@ data "aws_iam_role" "glue_role" {
   name = "${local.project}-glue-${local.env}"
 }
 
-# -----------------------------
-# Lambda role (assume already exists)
-# -----------------------------
 data "aws_iam_role" "lambda_role" {
   name = "${local.project}-lambda-${local.env}"
+}
+
+########################
+# Fail-fast if Lambda folder is empty
+########################
+
+resource "null_resource" "validate_lambda" {
+  count = length(local.lambda_files) == 0 ? 1 : 0
+
+  provisioner "local-exec" {
+    command = "echo 'ERROR: Lambda folder is empty or no .py files found!' && exit 1"
+  }
+}
+
+########################
+# Archive Lambda folder
+########################
+
+data "archive_file" "lambda_zip" {
+  count       = length(local.lambda_files) > 0 ? 1 : 0
+  type        = "zip"
+  source_dir  = "${path.module}/lambda"
+  output_path = "${path.module}/lambda/s3_to_glue.zip"
+  depends_on  = [null_resource.validate_lambda]
 }
 
 ########################
@@ -85,86 +109,15 @@ resource "aws_glue_job" "csv_to_parquet" {
 }
 
 ########################
-# Lambda Packaging (auto-zip, fail-fast)
-########################
-
-# Check for Python files in the lambda folder
-locals {
-  lambda_files = fileset("${path.module}/lambda", "**/*.py")
-}
-
-# Fail immediately if no Python files found
-resource "null_resource" "validate_lambda" {
-  count = length(local.lambda_files) == 0 ? 1 : 0
-
-  provisioner "local-exec" {
-    command = "echo 'ERROR: Lambda folder is empty or no .py files found!' && exit 1"
-  }
-}
-
-# Archive the Lambda folder into a ZIP
-data "archive_file" "lambda_zip" {
-  count       = length(local.lambda_files) > 0 ? 1 : 0
-  type        = "zip"
-  source_dir  = "${path.module}/lambda"
-  output_path = "${path.module}/lambda/s3_to_glue.zip"
-  depends_on  = [null_resource.validate_lambda]
-}
-
-########################
-# Lambda IAM Role
-########################
-
-resource "aws_iam_role" "lambda_role" {
-  name = "${local.project}-lambda-${local.env}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "lambda_policy" {
-  role = aws_iam_role.lambda_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "glue:StartJobRun"
-        ]
-        Resource = aws_glue_job.csv_to_parquet.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-########################
 # Lambda Function
 ########################
 
 resource "aws_lambda_function" "s3_to_glue" {
   function_name = "${local.project}-s3-to-glue-${local.env}"
-  role          = aws_iam_role.lambda_role.arn
+  role          = data.aws_iam_role.lambda_role.arn
   handler       = "s3_to_glue.handler"
   runtime       = "python3.11"
 
-  # Access the first (and only) archive_file instance
   filename = data.archive_file.lambda_zip[0].output_path
 
   environment {
@@ -173,7 +126,7 @@ resource "aws_lambda_function" "s3_to_glue" {
     }
   }
 
-  depends_on = [aws_iam_role_policy.lambda_policy, data.archive_file.lambda_zip]
+  depends_on = [data.archive_file.lambda_zip]
 }
 
 ########################
@@ -187,14 +140,8 @@ resource "aws_cloudwatch_event_rule" "s3_csv_upload" {
     source      = ["aws.s3"]
     detail-type = ["Object Created"]
     detail = {
-      bucket = {
-        name = [data.aws_s3_bucket.bronze_bucket.bucket]
-      }
-      object = {
-        key = [
-          { suffix = ".csv" }
-        ]
-      }
+      bucket = { name = [data.aws_s3_bucket.bronze_bucket.bucket] }
+      object = { key = [{ suffix = ".csv" }] }
     }
   })
 }
