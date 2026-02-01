@@ -42,6 +42,13 @@ data "aws_iam_role" "glue_role" {
   name = "${local.project}-glue-${local.env}"
 }
 
+# -----------------------------
+# Lambda role (assume already exists)
+# -----------------------------
+data "aws_iam_role" "lambda_role" {
+  name = "${local.project}-lambda-${local.env}"
+}
+
 ########################
 # Upload Glue Script
 ########################
@@ -78,49 +85,6 @@ resource "aws_glue_job" "csv_to_parquet" {
 }
 
 ########################
-# Lambda IAM Role
-########################
-
-resource "aws_iam_role" "lambda_role" {
-  name = "${local.project}-lambda-${local.env}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "lambda_policy" {
-  role = aws_iam_role.lambda_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "glue:StartJobRun"
-        ]
-        Resource = aws_glue_job.csv_to_parquet.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-########################
 # Lambda Packaging (auto-zip)
 ########################
 
@@ -136,7 +100,7 @@ data "archive_file" "lambda_zip" {
 
 resource "aws_lambda_function" "s3_to_glue" {
   function_name = "${local.project}-s3-to-glue-${local.env}"
-  role          = aws_iam_role.lambda_role.arn
+  role          = data.aws_iam_role.lambda_role.arn
   handler       = "s3_to_glue.handler"
   runtime       = "python3.11"
 
@@ -147,8 +111,6 @@ resource "aws_lambda_function" "s3_to_glue" {
       GLUE_JOB_NAME = aws_glue_job.csv_to_parquet.name
     }
   }
-
-  depends_on = [aws_iam_role_policy.lambda_policy]
 }
 
 ########################
@@ -194,5 +156,28 @@ resource "aws_lambda_permission" "allow_eventbridge" {
   function_name = aws_lambda_function.s3_to_glue.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.s3_csv_upload.arn
+}
+
+########################
+# Glue role policy to access scripts bucket
+########################
+
+resource "aws_iam_role_policy" "glue_s3_access" {
+  name = "GlueScriptAccess"
+  role = data.aws_iam_role.glue_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:ListBucket"]
+        Resource = [
+          "arn:aws:s3:::${data.aws_s3_bucket.scripts_bucket.bucket}",
+          "arn:aws:s3:::${data.aws_s3_bucket.scripts_bucket.bucket}/*"
+        ]
+      }
+    ]
+  })
 }
 
