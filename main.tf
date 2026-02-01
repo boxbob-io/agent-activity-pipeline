@@ -47,6 +47,14 @@ data "aws_iam_role" "lambda_role" {
 }
 
 ########################
+# Existing Lambda (DATA ONLY)
+########################
+
+data "aws_lambda_function" "s3_to_glue" {
+  function_name = "${local.project}-s3-to-glue-${local.env}"
+}
+
+########################
 # Upload Glue Script
 ########################
 
