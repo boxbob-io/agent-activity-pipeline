@@ -203,7 +203,11 @@ resource "aws_glue_trigger" "csv_trigger" {
     job_name = aws_glue_job.csv_to_parquet.name
   }
 
-  # EventBridge rule will trigger this
-  predicate {}
+  predicate {
+    conditions {
+      logical_operator = "EQUALS"
+      state            = "SUCCEEDED"
+    }
+  }
 }
 
