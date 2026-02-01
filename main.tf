@@ -23,7 +23,7 @@ locals {
 }
 
 ########################
-# Existing S3 Buckets
+# Existing Infrastructure (DATA ONLY)
 ########################
 
 data "aws_s3_bucket" "bronze_bucket" {
@@ -35,7 +35,11 @@ data "aws_s3_bucket" "silver_bucket" {
 }
 
 data "aws_s3_bucket" "scripts_bucket" {
-  bucket = "${local.project}-scripts-${local.env}"
+  bucket = "${local.project}-scripts"
+}
+
+data "aws_iam_role" "glue_role" {
+  name = "${local.project}-glue-${local.env}"
 }
 
 ########################
@@ -50,65 +54,15 @@ resource "aws_s3_object" "glue_script" {
 }
 
 ########################
-# IAM Role for Glue
-########################
-
-resource "aws_iam_role" "glue_role" {
-  name = "${local.project}-glue-${local.env}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "glue.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "glue_policy" {
-  role = aws_iam_role.glue_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.aws_s3_bucket.bronze_bucket.arn,
-          "${data.aws_s3_bucket.bronze_bucket.arn}/*",
-          data.aws_s3_bucket.silver_bucket.arn,
-          "${data.aws_s3_bucket.silver_bucket.arn}/*",
-          data.aws_s3_bucket.scripts_bucket.arn,
-          "${data.aws_s3_bucket.scripts_bucket.arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-########################
-# Glue Job
+# Glue Job (Per-file processing)
 ########################
 
 resource "aws_glue_job" "csv_to_parquet" {
   name     = "${local.project}-csv-to-parquet-${local.env}"
-  role_arn = aws_iam_role.glue_role.arn
+  role_arn = data.aws_iam_role.glue_role.arn
+
+  glue_version = "4.0"
+  max_capacity = 2
 
   command {
     name            = "glueetl"
@@ -116,18 +70,15 @@ resource "aws_glue_job" "csv_to_parquet" {
     script_location = "s3://${data.aws_s3_bucket.scripts_bucket.bucket}/${aws_s3_object.glue_script.key}"
   }
 
-  glue_version = "4.0"
-  max_capacity = 2
-
   default_arguments = {
-    "--TempDir"     = "s3://${data.aws_s3_bucket.silver_bucket.bucket}/temp/"
-    "--output_path" = "s3://${data.aws_s3_bucket.silver_bucket.bucket}/"
     "--job-language" = "python"
+    "--TempDir"      = "s3://${data.aws_s3_bucket.silver_bucket.bucket}/temp/"
+    "--output_path"  = "s3://${data.aws_s3_bucket.silver_bucket.bucket}/"
   }
 }
 
 ########################
-# EventBridge Rule (S3 CSV Upload)
+# EventBridge Rule (CSV Upload)
 ########################
 
 resource "aws_cloudwatch_event_rule" "s3_csv_upload" {
@@ -141,9 +92,9 @@ resource "aws_cloudwatch_event_rule" "s3_csv_upload" {
         name = [data.aws_s3_bucket.bronze_bucket.bucket]
       }
       object = {
-        key = [{
-          suffix = ".csv"
-        }]
+        key = [
+          { suffix = ".csv" }
+        ]
       }
     }
   })
@@ -157,7 +108,10 @@ resource "aws_cloudwatch_event_target" "glue_job_target" {
   rule      = aws_cloudwatch_event_rule.s3_csv_upload.name
   target_id = "GlueCsvToParquet"
   arn       = aws_glue_job.csv_to_parquet.arn
-  role_arn = aws_iam_role.glue_role.arn
+
+  # This role must ALREADY allow events.amazonaws.com
+  # to call glue:StartJobRun
+  role_arn = data.aws_iam_role.glue_role.arn
 
   input_transformer {
     input_paths = {
@@ -176,19 +130,3 @@ EOF
   }
 }
 
-########################
-# Allow EventBridge to Start Glue
-########################
-
-resource "aws_iam_role_policy" "eventbridge_glue_start" {
-  role = aws_iam_role.glue_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = "glue:StartJobRun"
-      Resource = aws_glue_job.csv_to_parquet.arn
-    }]
-  })
-}
