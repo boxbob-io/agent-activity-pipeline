@@ -46,10 +46,6 @@ data "aws_iam_role" "lambda_role" {
   name = "${local.project}-lambda-${local.env}"
 }
 
-########################
-# Existing Lambda (DATA ONLY)
-########################
-
 data "aws_lambda_function" "s3_to_glue" {
   function_name = "${local.project}-s3-to-glue-${local.env}"
 }
@@ -90,7 +86,7 @@ resource "aws_glue_job" "csv_to_parquet" {
 }
 
 ########################
-# Lambda Auto-Zip
+# Lambda Auto-ZIP
 ########################
 
 locals {
@@ -114,12 +110,15 @@ data "archive_file" "lambda_zip" {
 }
 
 ########################
-# Lambda Function (update existing)
+# Lambda Code Update Only
 ########################
 
-resource "aws_lambda_function" "s3_to_glue" {
+resource "aws_lambda_function" "update_s3_to_glue" {
   function_name = data.aws_lambda_function.s3_to_glue.function_name
   filename      = data.archive_file.lambda_zip[0].output_path
+  role          = data.aws_iam_role.lambda_role.arn
+  handler       = "s3_to_glue.handler"
+  runtime       = "python3.11"
 
   lifecycle {
     ignore_changes = [
