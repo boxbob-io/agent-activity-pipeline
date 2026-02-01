@@ -82,23 +82,47 @@ resource "aws_glue_job" "csv_to_parquet" {
 }
 
 ########################
-# Lambda Function (prebuilt ZIP)
+# Lambda Auto-Zip
+########################
+
+locals {
+  lambda_files = fileset("${path.module}/lambda", "**/*.py")
+}
+
+resource "null_resource" "validate_lambda" {
+  count = length(local.lambda_files) == 0 ? 1 : 0
+
+  provisioner "local-exec" {
+    command = "echo 'ERROR: Lambda folder is empty or no .py files found!' && exit 1"
+  }
+}
+
+data "archive_file" "lambda_zip" {
+  count       = length(local.lambda_files) > 0 ? 1 : 0
+  type        = "zip"
+  source_dir  = "${path.module}/lambda"
+  output_path = "${path.module}/lambda/s3_to_glue.zip"
+  depends_on  = [null_resource.validate_lambda]
+}
+
+########################
+# Lambda Function (update existing)
 ########################
 
 resource "aws_lambda_function" "s3_to_glue" {
-  function_name = "${local.project}-s3-to-glue-${local.env}"
-  role          = data.aws_iam_role.lambda_role.arn
-  handler       = "s3_to_glue.handler"
-  runtime       = "python3.11"
+  function_name = data.aws_lambda_function.s3_to_glue.function_name
+  filename      = data.archive_file.lambda_zip[0].output_path
 
-  # Prebuilt ZIP
-  filename = "${path.module}/lambda/s3_to_glue.zip"
-
-  environment {
-    variables = {
-      GLUE_JOB_NAME = aws_glue_job.csv_to_parquet.name
-    }
+  lifecycle {
+    ignore_changes = [
+      role,
+      handler,
+      runtime,
+      environment,
+    ]
   }
+
+  depends_on = [data.archive_file.lambda_zip]
 }
 
 ########################
@@ -125,7 +149,7 @@ resource "aws_cloudwatch_event_rule" "s3_csv_upload" {
 resource "aws_cloudwatch_event_target" "lambda_target" {
   rule      = aws_cloudwatch_event_rule.s3_csv_upload.name
   target_id = "S3ToGlueLambda"
-  arn       = aws_lambda_function.s3_to_glue.arn
+  arn       = data.aws_lambda_function.s3_to_glue.arn
 }
 
 ########################
@@ -135,7 +159,7 @@ resource "aws_cloudwatch_event_target" "lambda_target" {
 resource "aws_lambda_permission" "allow_eventbridge" {
   statement_id  = "AllowEventBridgeInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.s3_to_glue.function_name
+  function_name = data.aws_lambda_function.s3_to_glue.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.s3_csv_upload.arn
 }
