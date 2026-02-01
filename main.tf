@@ -107,7 +107,7 @@ resource "aws_cloudwatch_event_rule" "s3_csv_upload" {
 resource "aws_cloudwatch_event_target" "glue_job_target" {
   rule      = aws_cloudwatch_event_rule.s3_csv_upload.name
   target_id = "GlueCsvToParquet"
-  arn       = aws_glue_job.csv_to_parquet.arn
+  arn       = aws_glue_job.csv_to_parquet.name
 
   # This role must ALREADY allow events.amazonaws.com
   # to call glue:StartJobRun
