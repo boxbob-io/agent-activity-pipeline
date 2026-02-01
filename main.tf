@@ -29,7 +29,7 @@ resource "aws_s3_bucket" "ingest_bucket" {
 }
 
 resource "aws_s3_bucket_versioning" "ingest_bucket" {
-  bucket = aws_s3_bucket.inget_bucket.id
+  bucket = aws_s3_bucket.ingest_bucket.id
 
   versioning_configuration {
     status = "Enabled"
