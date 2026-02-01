@@ -35,7 +35,7 @@ data "aws_s3_bucket" "silver_bucket" {
 }
 
 data "aws_s3_bucket" "scripts_bucket" {
-  bucket = "${local.project}-scripts"
+  bucket = "${local.project}-scripts-${local.env}"
 }
 
 data "aws_iam_role" "glue_role" {
