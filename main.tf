@@ -190,4 +190,5 @@ resource "aws_iam_role_policy" "eventbridge_glue_start" {
       Action = "glue:StartJobRun"
       Resource = aws_glue_job.csv_to_parquet.arn
     }]
-
+  })
+}
