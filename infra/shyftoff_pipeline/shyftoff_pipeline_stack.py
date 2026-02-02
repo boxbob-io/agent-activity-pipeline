@@ -42,7 +42,7 @@ class ShyftoffPipelineStack(Stack):
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
             ]
         )
-		scripts_bucket.grant_read(glue_role)
+        scripts_bucket.grant_read(glue_role)
         lambda_role = iam.Role(
             self, "LambdaExecutionRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
