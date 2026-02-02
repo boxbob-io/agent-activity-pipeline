@@ -74,7 +74,7 @@ class ShyftoffPipelineStack(Stack):
             self, "StepFunctionRole",
             assumed_by=iam.ServicePrincipal("states.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSStepFunctionsFullAccess")
+                iam.ManagedPolicy.from_aws_managed_policy_name("AWSStepFunctionsFullAccess")
             ]
         )
         silver_bucket.grant_read(step_fn_role)
