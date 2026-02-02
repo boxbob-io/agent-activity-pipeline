@@ -160,14 +160,17 @@ class ShyftoffPipelineStack(Stack):
         # -----------------------------
         # Step Function
         # -----------------------------
+        
         generate_query_task = tasks.LambdaInvoke(
-            self, "GenerateAthenaQuery",
+            self,
+            "GenerateAthenaQuery",
             lambda_function=generate_query_lambda,
-            output_path="$.Payload"  # Only pass Lambda's Payload
+            output_path="$.Payload"   # => { "athena_query": "CREATE TABLE AS ..." }
         )
-
+        
         msck_repair_task = tasks.CallAwsService(
-            self, "MSCKRepairSilverTable",
+            self,
+            "MSCKRepairSilverTable",
             service="athena",
             action="startQueryExecution",
             parameters={
@@ -178,33 +181,41 @@ class ShyftoffPipelineStack(Stack):
             },
             integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
             iam_resources=["*"],
-            result_path="$.msck_result"  # keep Lambda output intact
+            result_path="$.msck_result"   # Merge MSCK result, do NOT overwrite input
         )
-
+        
         athena_ctas_task = tasks.CallAwsService(
-            self, "RunAthenaCTAS",
+            self,
+            "RunAthenaCTAS",
             service="athena",
             action="startQueryExecution",
             parameters={
-                "QueryString.$": "$.athena_query",  # Read CTAS from Lambda output
+                "QueryString.$": "$.athena_query",
                 "ResultConfiguration": {
                     "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
                 }
             },
             integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
-            iam_resources=["*"]
+            iam_resources=["*"],
+            result_path="$.ctas_result"   # Optional but useful for debugging
         )
-
-        step_fn_definition = generate_query_task.next(msck_repair_task).next(athena_ctas_task)
-
+        
+        step_fn_definition = (
+            generate_query_task
+                .next(msck_repair_task)
+                .next(athena_ctas_task)
+        )
+        
         step_fn = sfn.StateMachine(
-            self, "WeeklySummaryStateMachine",
+            self,
+            "WeeklySummaryStateMachine",
             definition=step_fn_definition,
             role=step_fn_role
         )
-
+        
         glue_to_stepfn_lambda.add_environment(
-            "STEP_FUNCTION_ARN", step_fn.state_machine_arn
+            "STEP_FUNCTION_ARN",
+            step_fn.state_machine_arn
         )
 
         # -----------------------------
