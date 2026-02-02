@@ -1,28 +1,8 @@
-name: Deploy CDK Pipeline
-
-on:
-  push:
-    branches:
-      - main
-      - dev
-  workflow_dispatch:
-
-env:
-  BRONZE_BUCKET: shyftoff-pipeline-bronze-dev
-  SILVER_BUCKET: shyftoff-pipeline-silver-dev
-  SCRIPTS_BUCKET: shyftoff-pipeline-scripts-dev
-  GLUE_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-glue-dev
-  LAMBDA_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-lambda-dev
-  AWS_REGION: us-east-1
-  CDK_STACK_NAME: ShyftoffPipelineStack
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set Python path
         run: echo "PYTHONPATH=${GITHUB_WORKSPACE}/infra" >> $GITHUB_ENV
@@ -53,12 +33,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Zip Lambda folder
-        working-directory: infra
+      - name: Zip Lambda file
+        working-directory: infra/lambda
         run: |
-          cd lambda/s3_to_glue
-          zip -r ../../s3_to_glue.zip ./*
-          cd ../../
+          if [ -f s3_to_glue.py ]; then
+            zip ../s3_to_glue.zip s3_to_glue.py
+          else
+            echo "ERROR: Lambda file s3_to_glue.py not found!" && exit 1
+          fi
 
       - name: CDK Bootstrap
         working-directory: infra
@@ -66,6 +48,5 @@ jobs:
 
       - name: Deploy CDK stack
         working-directory: infra
-        run: |
-          cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
+        run: cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
 

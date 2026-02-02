@@ -72,8 +72,8 @@ class ShyftoffPipelineStack(Stack):
         lambda_fn = _lambda.Function(
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",
-            code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder inside infra/
+            handler="s3_to_glue.handler",
+            code=_lambda.Code.from_asset("lambda/s3_to_glue.zip"),
             role=lambda_role,
             environment={
                 "GLUE_JOB_NAME": glue_job.name
