@@ -23,17 +23,14 @@ class ShyftoffPipelineStack(Stack):
             self, "BronzeBucket",
             bucket_name=os.environ["BRONZE_BUCKET"]
         )
-
         silver_bucket = s3.Bucket.from_bucket_name(
             self, "SilverBucket",
             bucket_name=os.environ["SILVER_BUCKET"]
         )
-
         scripts_bucket = s3.Bucket.from_bucket_name(
             self, "ScriptsBucket",
             bucket_name=os.environ["SCRIPTS_BUCKET"]
         )
-
         gold_bucket = s3.Bucket.from_bucket_name(
             self, "GoldBucket",
             bucket_name=os.environ["GOLD_BUCKET"]
@@ -59,23 +56,25 @@ class ShyftoffPipelineStack(Stack):
             self, "LambdaExecutionRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole"),
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
             ]
         )
         lambda_role.add_to_policy(
             iam.PolicyStatement(
-                actions=["glue:StartJobRun", "states:StartExecution", "s3:ListBucket", "s3:GetObject"],
+                actions=[
+                    "glue:StartJobRun",
+                    "states:StartExecution",
+                    "s3:ListBucket",
+                    "s3:GetObject"
+                ],
                 resources=["*"]
             )
         )
 
-        # Step Function role with Athena permissions
+        # Step Function role
         step_fn_role = iam.Role(
             self, "StepFunctionRole",
-            assumed_by=iam.ServicePrincipal("states.amazonaws.com"),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("AWSStepFunctionsFullAccess")
-            ]
+            assumed_by=iam.ServicePrincipal("states.amazonaws.com")
         )
         silver_bucket.grant_read(step_fn_role)
         gold_bucket.grant_read_write(step_fn_role)
@@ -112,24 +111,23 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # Lambda: Trigger Glue job on CSV upload
+        # Lambda 1: Trigger Glue job on CSV upload
         # -----------------------------
-        lambda_trigger_glue = _lambda.Function(
+        s3_to_glue_lambda = _lambda.Function(
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="lambda_function.handler",
-            code=_lambda.Code.from_asset("infra/lambda/glue_to_stepfn"),
+            code=_lambda.Code.from_asset("lambda/s3_to_glue"),
             role=lambda_role,
             environment={
                 "GLUE_JOB_NAME": glue_job.ref,
-                "SILVER_BUCKET": silver_bucket.bucket_name,
-                "STEP_FUNCTION_ARN": "PLACEHOLDER"  # updated after Step Function is created
+                "SILVER_BUCKET": silver_bucket.bucket_name
             }
         )
 
         # EventBridge: CSV upload → Lambda
-        rule_csv_upload = events.Rule(
-            self, "S3CsvUploadRule",
+        events.Rule(
+            self, "CsvUploadEventRule",
             event_pattern=events.EventPattern(
                 source=["aws.s3"],
                 detail_type=["Object Created"],
@@ -138,60 +136,26 @@ class ShyftoffPipelineStack(Stack):
                     "object": {"key": [{"suffix": ".csv"}]}
                 }
             )
-        )
-        rule_csv_upload.add_target(targets.LambdaFunction(lambda_trigger_glue))
+        ).add_target(targets.LambdaFunction(s3_to_glue_lambda))
 
         # -----------------------------
-        # Step Function Lambda: Generate Athena Query
+        # Lambda 2: Trigger Step Function after Glue job success
         # -----------------------------
-        generate_query_lambda = _lambda.Function(
-            self, "GenerateAthenaQueryLambda",
+        glue_to_stepfn_lambda = _lambda.Function(
+            self, "GlueToStepFnLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("infra/lambda/generate_athena_query"),
-            role=lambda_role
+            handler="lambda_function.handler",  # function inside lambda_function.py
+            code=_lambda.Code.from_asset("lambda/glue_to_stepfn"),  # folder relative to infra/
+            role=lambda_role,
+            environment={
+                "SILVER_BUCKET": silver_bucket.bucket_name,
+                "STEP_FUNCTION_ARN": "PLACEHOLDER"  # updated after state machine creation
+            }
         )
 
-        # Step Function Task 1: Generate Athena query
-        generate_query_task = tasks.LambdaInvoke(
-            self, "Generate Athena Query",
-            lambda_function=generate_query_lambda,
-            output_path="$.Payload"
-        )
-
-        # Step Function Task 2: Execute Athena query dynamically
-        athena_task = tasks.CallAwsService(
-            self, "RunAthenaQuery",
-            service="athena",
-            action="startQueryExecution",
-            parameters={
-                "QueryString": sfn.JsonPath.string_at("$.athena_query"),  # dynamic SQL
-                "ResultConfiguration": {
-                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/"
-                }
-            },
-            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
-            iam_resources=["*"]
-        )
-
-        # Chain Step Function tasks
-        definition = generate_query_task.next(athena_task)
-
-        # Create Step Function
-        step_fn = sfn.StateMachine(
-            self, "WeeklySummaryStateMachine",
-            definition=definition,
-            role=step_fn_role
-        )
-
-        # Update Lambda environment now that Step Function exists
-        lambda_trigger_glue.add_environment("STEP_FUNCTION_ARN", step_fn.state_machine_arn)
-
-        # -----------------------------
         # EventBridge: Glue job completion → Lambda
-        # -----------------------------
-        glue_completion_rule = events.Rule(
-            self, "GlueJobCompletionRule",
+        events.Rule(
+            self, "GlueJobSuccessRule",
             event_pattern=events.EventPattern(
                 source=["aws.glue"],
                 detail_type=["Glue Job State Change"],
@@ -200,6 +164,46 @@ class ShyftoffPipelineStack(Stack):
                     "state": ["SUCCEEDED"]
                 }
             )
+        ).add_target(targets.LambdaFunction(glue_to_stepfn_lambda))
+
+        # -----------------------------
+        # Step Function Lambda: Generate Athena Query
+        # -----------------------------
+        generate_query_lambda = _lambda.Function(
+            self, "GenerateAthenaQueryLambda",
+            runtime=_lambda.Runtime.PYTHON_3_11,
+            handler="lambda_function.lambda_handler",
+            code=_lambda.Code.from_asset("lambda/generate_athena_query"),
+            role=lambda_role
         )
-        glue_completion_rule.add_target(targets.LambdaFunction(lambda_trigger_glue))
+
+        # Step Function tasks
+        generate_query_task = tasks.LambdaInvoke(
+            self, "GenerateAthenaQuery",
+            lambda_function=generate_query_lambda,
+            output_path="$.Payload"
+        )
+        athena_task = tasks.CallAwsService(
+            self, "RunAthenaQuery",
+            service="athena",
+            action="startQueryExecution",
+            parameters={
+                "QueryString": sfn.JsonPath.string_at("$.athena_query"),
+                "ResultConfiguration": {
+                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/"
+                }
+            },
+            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
+            iam_resources=["*"]
+        )
+
+        # Create Step Function
+        step_fn = sfn.StateMachine(
+            self, "WeeklySummaryStateMachine",
+            definition=generate_query_task.next(athena_task),
+            role=step_fn_role
+        )
+
+        # Update Glue-to-StepFn Lambda with state machine ARN
+        glue_to_stepfn_lambda.add_environment("STEP_FUNCTION_ARN", step_fn.state_machine_arn)
 

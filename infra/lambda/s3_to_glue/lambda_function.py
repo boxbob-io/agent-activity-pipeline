@@ -9,7 +9,7 @@ logger.setLevel(logging.INFO)
 glue_client = boto3.client("glue")
 
 GLUE_JOB_NAME = os.environ["GLUE_JOB_NAME"]
-SILVER_BUCKET = os.environ["SILVER_BUCKET"]  # added environment variable
+SILVER_BUCKET = os.environ["SILVER_BUCKET"]
 
 def handler(event, context):
     logger.info(f"Received event: {json.dumps(event)}")
