@@ -148,14 +148,7 @@ class ShyftoffPipelineStack(Stack):
         # -----------------------------
         # Step Function Lambdas
         # -----------------------------
-        generate_query_lambda = _lambda.Function(
-            self, "GenerateAthenaQueryLambda",
-            runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",
-            code=_lambda.Code.from_asset("lambda/generate_athena_query"),
-            role=lambda_role
-        )
-        
+
         # LambdaInvoke task: generates Athena CTAS query
         generate_query_task = tasks.LambdaInvoke(
             self, "GenerateAthenaQuery",
