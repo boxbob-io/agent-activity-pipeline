@@ -19,53 +19,52 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       # 1. Checkout code
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      # 2. Set Python path so CDK can import your packages
-      - name: Set Python path
-        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}/infra" >> $GITHUB_ENV
+      # 2. Set Python path so CDK can find local modules
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
 
-      # 3. Set up Node.js (needed for CDK CLI)
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      # 3. Set up Node.js for CDK
+      - uses: actions/setup-node@v3
         with:
           node-version: "20"
 
       # 4. Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      # 5. Install AWS CDK
-      - name: Install AWS CDK
-        run: npm install -g aws-cdk@2
+      # 5. Install AWS CDK CLI
+      - run: npm install -g aws-cdk@2
 
       # 6. Install Python dependencies
-      - name: Install Python dependencies
+      - name: Install Python deps
         working-directory: infra
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 7. Configure AWS Credentials
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      # 7. Configure AWS credentials
+      - uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 8. CDK Bootstrap (if first deployment)
+      # 8. Upload Glue script to S3
+      - name: Upload Glue script
+        run: |
+          aws s3 cp infra/glue/csv_to_parquet.py s3://${{ env.SCRIPTS_BUCKET }}/csv_to_parquet.py
+
+      # 9. CDK bootstrap (skip if already done)
       - name: CDK Bootstrap
         working-directory: infra
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
 
-      # 9. Deploy CDK stack
+      # 10. Deploy CDK stack
       - name: Deploy CDK stack
         working-directory: infra
         run: cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
