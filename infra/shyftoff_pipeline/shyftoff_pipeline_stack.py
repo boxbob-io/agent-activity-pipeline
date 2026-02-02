@@ -12,7 +12,6 @@ from aws_cdk import (
 from constructs import Construct
 import os
 
-
 class ShyftoffPipelineStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
@@ -44,9 +43,7 @@ class ShyftoffPipelineStack(Stack):
             self, "GlueJobRole",
             assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AWSGlueServiceRole"
-                )
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
             ]
         )
         scripts_bucket.grant_read(glue_role)
@@ -57,9 +54,7 @@ class ShyftoffPipelineStack(Stack):
             self, "LambdaExecutionRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AWSLambdaBasicExecutionRole"
-                )
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
             ]
         )
         lambda_role.add_to_policy(
@@ -105,7 +100,7 @@ class ShyftoffPipelineStack(Stack):
         silver_table = glue.CfnTable(
             self, "SilverParquetTable",
             catalog_id=self.account,
-            database_name="silver",
+            database_name=silver_db.ref,
             table_input=glue.CfnTable.TableInputProperty(
                 name="parquet_data",
                 table_type="EXTERNAL_TABLE",
@@ -123,9 +118,7 @@ class ShyftoffPipelineStack(Stack):
                     input_format="org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
                     output_format="org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
                     serde_info=glue.CfnTable.SerdeInfoProperty(
-                        serialization_library=(
-                            "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
-                        )
+                        serialization_library="org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
                     ),
                     columns=[
                         glue.CfnTable.ColumnProperty(name="Extension", type="string"),
@@ -136,8 +129,6 @@ class ShyftoffPipelineStack(Stack):
                 )
             )
         )
-
-        # 🚨 CRITICAL: enforce creation order
         silver_table.node.add_dependency(silver_db)
 
         # -----------------------------
@@ -162,7 +153,7 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # Lambdas + EventBridge
+        # Lambda 1: S3 → Glue
         # -----------------------------
         s3_to_glue_lambda = _lambda.Function(
             self, "S3ToGlueLambda",
@@ -171,9 +162,11 @@ class ShyftoffPipelineStack(Stack):
             code=_lambda.Code.from_asset("lambda/s3_to_glue"),
             role=lambda_role,
             environment={
-                "GLUE_JOB_NAME": glue_job.ref
+                "GLUE_JOB_NAME": glue_job.ref,
+                "SILVER_BUCKET": silver_bucket.bucket_name
             }
         )
+        bronze_bucket.grant_read(s3_to_glue_lambda)
 
         events.Rule(
             self, "CsvUploadEventRule",
@@ -187,6 +180,9 @@ class ShyftoffPipelineStack(Stack):
             )
         ).add_target(targets.LambdaFunction(s3_to_glue_lambda))
 
+        # -----------------------------
+        # Lambda 2: Glue → StepFn
+        # -----------------------------
         glue_to_stepfn_lambda = _lambda.Function(
             self, "GlueToStepFnLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
@@ -195,9 +191,10 @@ class ShyftoffPipelineStack(Stack):
             role=lambda_role,
             environment={
                 "SILVER_BUCKET": silver_bucket.bucket_name,
-                "STEP_FUNCTION_ARN": "PLACEHOLDER"
+                "STEP_FUNCTION_ARN": "PLACEHOLDER"  # updated after Step Function creation
             }
         )
+        silver_bucket.grant_read(glue_to_stepfn_lambda)
 
         events.Rule(
             self, "GlueJobSuccessRule",
@@ -255,11 +252,8 @@ class ShyftoffPipelineStack(Stack):
         )
 
         step_fn = sfn.StateMachine(
-            self,
-            "WeeklySummaryStateMachine",
-            definition=generate_query_task
-                .next(msck_repair_task)
-                .next(athena_ctas_task),
+            self, "WeeklySummaryStateMachine",
+            definition=generate_query_task.next(msck_repair_task).next(athena_ctas_task),
             role=step_fn_role
         )
 
@@ -267,4 +261,5 @@ class ShyftoffPipelineStack(Stack):
             "STEP_FUNCTION_ARN",
             step_fn.state_machine_arn
         )
+        step_fn.grant_start_execution(glue_to_stepfn_lambda)
 
