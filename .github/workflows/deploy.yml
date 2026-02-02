@@ -60,5 +60,6 @@ jobs:
 
       # 8. Deploy CDK stack
       - name: Deploy CDK stack
+		working-directory: infra
         run: cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
 
