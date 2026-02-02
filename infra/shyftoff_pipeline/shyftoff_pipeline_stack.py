@@ -118,7 +118,7 @@ class ShyftoffPipelineStack(Stack):
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="lambda_function.handler",
-            code=_lambda.Code.from_asset("lambda/glue_to_stepfn"),
+            code=_lambda.Code.from_asset("infra/lambda/glue_to_stepfn"),
             role=lambda_role,
             environment={
                 "GLUE_JOB_NAME": glue_job.ref,
@@ -148,7 +148,7 @@ class ShyftoffPipelineStack(Stack):
             self, "GenerateAthenaQueryLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("lambda/generate_athena_query"),
+            code=_lambda.Code.from_asset("infra/lambda/generate_athena_query"),
             role=lambda_role
         )
 
