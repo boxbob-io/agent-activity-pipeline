@@ -1,17 +1,17 @@
 import json
 
 def handler(event, context):
-    parquet_paths = event.get("silver_parquet_paths", [])
-    if not parquet_paths:
-        raise ValueError("No Silver parquet files provided.")
+    """
+    Generates an Athena CTAS query using the Glue table:
+    silver.parquet_data
+    """
 
-    # Build UNION ALL input for multiple parquet files (single quotes around S3 paths)
-    select_statements = [f"SELECT * FROM parquet.'{path}'" for path in parquet_paths]
-    union_query = " UNION ALL ".join(select_statements)
-
-    ctas_query = f"""
-    CREATE TABLE gold.weekly_summary
-    WITH (format='PARQUET') AS
+    ctas_query = """
+    CREATE TABLE IF NOT EXISTS gold.weekly_summary
+    WITH (
+        format = 'PARQUET',
+        external_location = 's3://shyftoff-pipeline-gold-dev/weekly_summary/'
+    ) AS
 
     WITH productive_events AS (
         SELECT
@@ -22,16 +22,14 @@ def handler(event, context):
                 WHEN "Action" = 'OFFLINE' AND "Details" = 'Backoffice' THEN 1
                 ELSE 0
             END AS productive_flag
-        FROM (
-            {union_query}
-        )
+        FROM silver.parquet_data
     ),
 
     intervalized AS (
         SELECT
             "Extension",
-            date_trunc('hour', done_on) +
-            floor(minute(done_on)/30) * interval '30' minute AS interval_start,
+            date_trunc('hour', done_on)
+              + floor(minute(done_on) / 30) * interval '30' minute AS interval_start,
             productive_flag
         FROM productive_events
     ),
@@ -51,6 +49,6 @@ def handler(event, context):
     """
 
     return {
-        "athena_query": ctas_query
+        "athena_query": ctas_query.strip()
     }
 

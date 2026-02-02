@@ -39,7 +39,6 @@ class ShyftoffPipelineStack(Stack):
         # -----------------------------
         # IAM Roles
         # -----------------------------
-        # Glue Job role
         glue_role = iam.Role(
             self, "GlueJobRole",
             assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
@@ -51,7 +50,6 @@ class ShyftoffPipelineStack(Stack):
         bronze_bucket.grant_read(glue_role)
         silver_bucket.grant_read_write(glue_role)
 
-        # Lambda execution role
         lambda_role = iam.Role(
             self, "LambdaExecutionRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
@@ -71,7 +69,6 @@ class ShyftoffPipelineStack(Stack):
             )
         )
 
-        # Step Function role
         step_fn_role = iam.Role(
             self, "StepFunctionRole",
             assumed_by=iam.ServicePrincipal("states.amazonaws.com")
@@ -90,6 +87,50 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
+        # Glue Database + Table (Silver)
+        # -----------------------------
+        glue.CfnDatabase(
+            self, "SilverDatabase",
+            catalog_id=self.account,
+            database_input=glue.CfnDatabase.DatabaseInputProperty(
+                name="silver"
+            )
+        )
+
+        glue.CfnTable(
+            self, "SilverParquetTable",
+            catalog_id=self.account,
+            database_name="silver",
+            table_input=glue.CfnTable.TableInputProperty(
+                name="parquet_data",
+                table_type="EXTERNAL_TABLE",
+                parameters={
+                    "classification": "parquet",
+                    "typeOfData": "file"
+                },
+                partition_keys=[
+                    glue.CfnTable.ColumnProperty(name="year", type="int"),
+                    glue.CfnTable.ColumnProperty(name="month", type="int"),
+                    glue.CfnTable.ColumnProperty(name="day", type="int"),
+                ],
+                storage_descriptor=glue.CfnTable.StorageDescriptorProperty(
+                    location=f"s3://{silver_bucket.bucket_name}/data/",
+                    input_format="org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
+                    output_format="org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
+                    serde_info=glue.CfnTable.SerdeInfoProperty(
+                        serialization_library="org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+                    ),
+                    columns=[
+                        glue.CfnTable.ColumnProperty(name="Extension", type="string"),
+                        glue.CfnTable.ColumnProperty(name="Done On", type="timestamp"),
+                        glue.CfnTable.ColumnProperty(name="Action", type="string"),
+                        glue.CfnTable.ColumnProperty(name="Details", type="string"),
+                    ]
+                )
+            )
+        )
+
+        # -----------------------------
         # Glue Job (CSV → Parquet)
         # -----------------------------
         glue_job = glue.CfnJob(
@@ -104,14 +145,14 @@ class ShyftoffPipelineStack(Stack):
             default_arguments={
                 "--job-language": "python",
                 "--TempDir": f"s3://{silver_bucket.bucket_name}/temp/",
-                "--output_path": f"s3://{silver_bucket.bucket_name}/"
+                "--output_path": f"s3://{silver_bucket.bucket_name}/data/"
             },
             glue_version="4.0",
             max_capacity=2
         )
 
         # -----------------------------
-        # Lambda 1: Trigger Glue job on CSV upload
+        # Lambdas + EventBridge
         # -----------------------------
         s3_to_glue_lambda = _lambda.Function(
             self, "S3ToGlueLambda",
@@ -120,12 +161,10 @@ class ShyftoffPipelineStack(Stack):
             code=_lambda.Code.from_asset("lambda/s3_to_glue"),
             role=lambda_role,
             environment={
-                "GLUE_JOB_NAME": glue_job.ref,
-                "SILVER_BUCKET": silver_bucket.bucket_name
+                "GLUE_JOB_NAME": glue_job.ref
             }
         )
 
-        # EventBridge: CSV upload → Lambda
         events.Rule(
             self, "CsvUploadEventRule",
             event_pattern=events.EventPattern(
@@ -138,9 +177,6 @@ class ShyftoffPipelineStack(Stack):
             )
         ).add_target(targets.LambdaFunction(s3_to_glue_lambda))
 
-        # -----------------------------
-        # Lambda 2: Trigger Step Function after Glue job success
-        # -----------------------------
         glue_to_stepfn_lambda = _lambda.Function(
             self, "GlueToStepFnLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
@@ -148,12 +184,10 @@ class ShyftoffPipelineStack(Stack):
             code=_lambda.Code.from_asset("lambda/glue_to_stepfn"),
             role=lambda_role,
             environment={
-                "SILVER_BUCKET": silver_bucket.bucket_name,
-                "STEP_FUNCTION_ARN": "PLACEHOLDER"  # updated after state machine creation
+                "STEP_FUNCTION_ARN": "PLACEHOLDER"
             }
         )
 
-        # EventBridge: Glue job completion → Lambda
         events.Rule(
             self, "GlueJobSuccessRule",
             event_pattern=events.EventPattern(
@@ -167,7 +201,7 @@ class ShyftoffPipelineStack(Stack):
         ).add_target(targets.LambdaFunction(glue_to_stepfn_lambda))
 
         # -----------------------------
-        # Step Function Lambda: Generate Athena Query
+        # Step Function
         # -----------------------------
         generate_query_lambda = _lambda.Function(
             self, "GenerateAthenaQueryLambda",
@@ -177,33 +211,48 @@ class ShyftoffPipelineStack(Stack):
             role=lambda_role
         )
 
-        # Step Function tasks
         generate_query_task = tasks.LambdaInvoke(
             self, "GenerateAthenaQuery",
             lambda_function=generate_query_lambda,
             output_path="$.Payload"
         )
-        athena_task = tasks.CallAwsService(
-            self, "RunAthenaQuery",
+
+        msck_repair_task = tasks.CallAwsService(
+            self, "MSCKRepairSilverTable",
+            service="athena",
+            action="startQueryExecution",
+            parameters={
+                "QueryString": "MSCK REPAIR TABLE silver.parquet_data",
+                "ResultConfiguration": {
+                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
+                }
+            },
+            iam_resources=["*"]
+        )
+
+        athena_ctas_task = tasks.CallAwsService(
+            self, "RunAthenaCTAS",
             service="athena",
             action="startQueryExecution",
             parameters={
                 "QueryString": sfn.JsonPath.string_at("$.athena_query"),
                 "ResultConfiguration": {
-                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/"
+                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
                 }
             },
-            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
             iam_resources=["*"]
         )
 
-        # Create Step Function
         step_fn = sfn.StateMachine(
             self, "WeeklySummaryStateMachine",
-            definition=generate_query_task.next(athena_task),
+            definition=generate_query_task
+                .next(msck_repair_task)
+                .next(athena_ctas_task),
             role=step_fn_role
         )
 
-        # Update Glue-to-StepFn Lambda with state machine ARN
-        glue_to_stepfn_lambda.add_environment("STEP_FUNCTION_ARN", step_fn.state_machine_arn)
+        glue_to_stepfn_lambda.add_environment(
+            "STEP_FUNCTION_ARN",
+            step_fn.state_machine_arn
+        )
 
