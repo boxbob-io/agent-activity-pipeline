@@ -90,7 +90,8 @@ class ShyftoffPipelineStack(Stack):
             code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder path
             role=lambda_role,
             environment={
-                "GLUE_JOB_NAME": glue_job.ref  # Use ref for CfnJob
+                "GLUE_JOB_NAME": glue_job.ref,
+                "SILVER_BUCKET": silver_bucket.bucket_name
             }
         )
 
