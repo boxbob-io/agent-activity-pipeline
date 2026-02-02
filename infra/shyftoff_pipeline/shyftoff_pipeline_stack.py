@@ -55,7 +55,7 @@ class ShyftoffPipelineStack(Stack):
             command=glue.CfnJob.JobCommandProperty(
                 name="glueetl",
                 python_version="3",
-                script_location=f"s3://{scripts_bucket.bucket_name}/scripts/csv_to_parquet.py"
+                script_location=f"s3://{scripts_bucket.bucket_name}/csv_to_parquet.py"
             ),
             default_arguments={
                 "--job-language": "python",
@@ -73,7 +73,7 @@ class ShyftoffPipelineStack(Stack):
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="lambda_function.handler",
-            code=_lambda.Code.from_asset("lambda/s3_to_glue"),
+            code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder inside infra/
             role=lambda_role,
             environment={
                 "GLUE_JOB_NAME": glue_job.name

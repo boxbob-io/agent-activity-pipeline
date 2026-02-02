@@ -19,11 +19,13 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
       - name: Set Python path
-        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}/infra" >> $GITHUB_ENV
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -35,7 +37,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install AWS CDK CLI
+      - name: Install AWS CDK
         run: npm install -g aws-cdk@2
 
       - name: Install Python dependencies
@@ -51,11 +53,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Zip Lambda folder
+        working-directory: infra
+        run: |
+          cd lambda/s3_to_glue
+          zip -r ../../s3_to_glue.zip ./*
+          cd ../../
+
       - name: CDK Bootstrap
         working-directory: infra
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
 
       - name: Deploy CDK stack
         working-directory: infra
-        run: cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
+        run: |
+          cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
 
