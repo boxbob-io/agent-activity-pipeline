@@ -19,18 +19,10 @@ class ShyftoffPipelineStack(Stack):
         # -----------------------------
         # Buckets
         # -----------------------------
-        bronze_bucket = s3.Bucket.from_bucket_name(
-            self, "BronzeBucket", bucket_name=os.environ["BRONZE_BUCKET"]
-        )
-        silver_bucket = s3.Bucket.from_bucket_name(
-            self, "SilverBucket", bucket_name=os.environ["SILVER_BUCKET"]
-        )
-        scripts_bucket = s3.Bucket.from_bucket_name(
-            self, "ScriptsBucket", bucket_name=os.environ["SCRIPTS_BUCKET"]
-        )
-        gold_bucket = s3.Bucket.from_bucket_name(
-            self, "GoldBucket", bucket_name=os.environ["GOLD_BUCKET"]
-        )
+        bronze_bucket = s3.Bucket.from_bucket_name(self, "BronzeBucket", bucket_name=os.environ["BRONZE_BUCKET"])
+        silver_bucket = s3.Bucket.from_bucket_name(self, "SilverBucket", bucket_name=os.environ["SILVER_BUCKET"])
+        scripts_bucket = s3.Bucket.from_bucket_name(self, "ScriptsBucket", bucket_name=os.environ["SCRIPTS_BUCKET"])
+        gold_bucket = s3.Bucket.from_bucket_name(self, "GoldBucket", bucket_name=os.environ["GOLD_BUCKET"])
 
         # -----------------------------
         # IAM Roles
@@ -38,9 +30,7 @@ class ShyftoffPipelineStack(Stack):
         glue_role = iam.Role(
             self, "GlueJobRole",
             assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
-            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name(
-                "service-role/AWSGlueServiceRole"
-            )]
+            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")]
         )
         scripts_bucket.grant_read(glue_role)
         bronze_bucket.grant_read(glue_role)
@@ -49,9 +39,7 @@ class ShyftoffPipelineStack(Stack):
         lambda_role = iam.Role(
             self, "LambdaExecutionRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
-            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name(
-                "service-role/AWSLambdaBasicExecutionRole"
-            )]
+            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")]
         )
         lambda_role.add_to_policy(iam.PolicyStatement(
             actions=["glue:StartJobRun", "states:StartExecution", "s3:ListBucket", "s3:GetObject"],
@@ -90,7 +78,6 @@ class ShyftoffPipelineStack(Stack):
             )
         )
 
-
         # -----------------------------
         # Glue Database + Table
         # -----------------------------
@@ -100,7 +87,6 @@ class ShyftoffPipelineStack(Stack):
             database_input=glue.CfnDatabase.DatabaseInputProperty(name="silver")
         )
 
-        # Gold database
         glue.CfnDatabase(
             self, "GoldDatabase",
             catalog_id=self.account,
@@ -189,14 +175,13 @@ class ShyftoffPipelineStack(Stack):
         # -----------------------------
         # Step Function
         # -----------------------------
-        
         generate_query_task = tasks.LambdaInvoke(
             self,
             "GenerateAthenaQuery",
             lambda_function=generate_query_lambda,
             output_path="$.Payload"   # => { "athena_query": "CREATE TABLE AS ..." }
         )
-        
+
         msck_repair_task = tasks.CallAwsService(
             self,
             "MSCKRepairSilverTable",
@@ -210,9 +195,25 @@ class ShyftoffPipelineStack(Stack):
             },
             integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
             iam_resources=["*"],
-            result_path="$.msck_result"   # Merge MSCK result, do NOT overwrite input
+            result_path="$.msck_result"
         )
-        
+
+        drop_weekly_table_task = tasks.CallAwsService(
+            self,
+            "DropWeeklySummaryTable",
+            service="athena",
+            action="startQueryExecution",
+            parameters={
+                "QueryString": "DROP TABLE IF EXISTS gold.weekly_summary",
+                "ResultConfiguration": {
+                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
+                }
+            },
+            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
+            iam_resources=["*"],
+            result_path="$.drop_result"
+        )
+
         athena_ctas_task = tasks.CallAwsService(
             self,
             "RunAthenaCTAS",
@@ -221,27 +222,28 @@ class ShyftoffPipelineStack(Stack):
             parameters={
                 "QueryString.$": "$.athena_query",
                 "ResultConfiguration": {
-                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
+                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/weekly_summary/"
                 }
             },
             integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
             iam_resources=["*"],
-            result_path="$.ctas_result"   # Optional but useful for debugging
+            result_path="$.ctas_result"
         )
-        
+
         step_fn_definition = (
             generate_query_task
-                .next(msck_repair_task)
-                .next(athena_ctas_task)
+            .next(msck_repair_task)
+            .next(drop_weekly_table_task)
+            .next(athena_ctas_task)
         )
-        
+
         step_fn = sfn.StateMachine(
             self,
             "WeeklySummaryStateMachine",
             definition=step_fn_definition,
             role=step_fn_role
         )
-        
+
         glue_to_stepfn_lambda.add_environment(
             "STEP_FUNCTION_ARN",
             step_fn.state_machine_arn
