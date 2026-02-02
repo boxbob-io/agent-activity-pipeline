@@ -92,12 +92,19 @@ class ShyftoffPipelineStack(Stack):
 
 
         # -----------------------------
-        # Glue Database + Table (Silver)
+        # Glue Database + Table
         # -----------------------------
         glue.CfnDatabase(
             self, "SilverDatabase",
             catalog_id=self.account,
             database_input=glue.CfnDatabase.DatabaseInputProperty(name="silver")
+        )
+
+        # Gold database
+        glue.CfnDatabase(
+            self, "GoldDatabase",
+            catalog_id=self.account,
+            database_input=glue.CfnDatabase.DatabaseInputProperty(name="gold")
         )
 
         glue.CfnTable(
