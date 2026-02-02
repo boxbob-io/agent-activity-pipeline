@@ -10,6 +10,7 @@ on:
 env:
   BRONZE_BUCKET: shyftoff-pipeline-bronze-dev
   SILVER_BUCKET: shyftoff-pipeline-silver-dev
+  GOLD_BUCKET: shyftoff-pipeline-gold-dev
   SCRIPTS_BUCKET: shyftoff-pipeline-scripts-dev
   GLUE_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-glue-dev
   LAMBDA_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-lambda-dev
