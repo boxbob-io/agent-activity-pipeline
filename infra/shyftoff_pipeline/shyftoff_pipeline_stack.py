@@ -33,11 +33,20 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # IAM Role for Glue (existing)
+        # IAM Roles
         # -----------------------------
-        glue_role = iam.Role.from_role_arn(
-            self, "GlueRole",
-            role_arn=os.environ["GLUE_ROLE_ARN"]
+        # Create a Glue role in this account
+        glue_role = iam.Role(
+            self, "GlueJobRole",
+            assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSGlueServiceRole")
+            ]
+        )
+
+        lambda_role = iam.Role.from_role_arn(
+            self, "LambdaRole",
+            role_arn=os.environ["LAMBDA_ROLE_ARN"]
         )
 
         # -----------------------------
@@ -67,23 +76,12 @@ class ShyftoffPipelineStack(Stack):
         lambda_fn = _lambda.Function(
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",   # file_name.function_name
-            code=_lambda.Code.from_asset("lambda/s3_to_glue"),
+            handler="lambda_function.handler",  # <file_name>.<function_name>
+            code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder path
+            role=lambda_role,
             environment={
-                "GLUE_JOB_NAME": glue_job.name
-            },
-            initial_policy=[
-                # Allow Lambda to start the Glue job
-                iam.PolicyStatement(
-                    actions=["glue:StartJobRun"],
-                    resources=[f"arn:aws:glue:{Stack.of(self).region}:{Stack.of(self).account}:job/{glue_job.name}"]
-                ),
-                # Allow Lambda to write logs
-                iam.PolicyStatement(
-                    actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-                    resources=["*"]
-                )
-            ]
+                "GLUE_JOB_NAME": glue_job.ref  # use ref for CfnJob
+            }
         )
 
         # -----------------------------
