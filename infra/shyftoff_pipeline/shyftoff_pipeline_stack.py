@@ -68,6 +68,25 @@ class ShyftoffPipelineStack(Stack):
             actions=["athena:StartQueryExecution", "athena:GetQueryExecution", "athena:GetQueryResults"],
             resources=["*"]
         ))
+        step_fn_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "glue:GetDatabase",
+                    "glue:GetDatabases",
+                    "glue:GetTable",
+                    "glue:GetTables",
+                    "glue:GetPartition",
+                    "glue:GetPartitions"
+                ],
+                resources=[
+                    f"arn:aws:glue:{self.region}:{self.account}:catalog",
+                    f"arn:aws:glue:{self.region}:{self.account}:database/*",
+                    f"arn:aws:glue:{self.region}:{self.account}:table/*/*"
+                ]
+            )
+        )
+
 
         # -----------------------------
         # Glue Database + Table (Silver)
