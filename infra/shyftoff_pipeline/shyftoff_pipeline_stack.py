@@ -153,12 +153,9 @@ class ShyftoffPipelineStack(Stack):
         generate_query_task = tasks.LambdaInvoke(
             self, "GenerateAthenaQuery",
             lambda_function=generate_query_lambda,
-            output_path="$.Payload",  # Only pass the Lambda output to the next step
-            result_selector={
-                "athena_query.$": "$.athena_query"  # ensures next task sees 'athena_query'
-            }
+            output_path="$.Payload"  # just pass through the Lambda return value
         )
-        
+
         # Athena task: MSCK repair Silver table (add partitions)
         msck_repair_task = tasks.CallAwsService(
             self, "MSCKRepairSilverTable",
