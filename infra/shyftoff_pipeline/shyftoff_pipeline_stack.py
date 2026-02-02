@@ -41,17 +41,10 @@ class ShyftoffPipelineStack(Stack):
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")]
         )
-        lambda_role.add_to_policy(
-            iam.PolicyStatement(
-                actions=[
-                    "glue:StartJobRun",
-                    "states:StartExecution",
-                    "s3:ListBucket",
-                    "s3:GetObject"
-                ],
-                resources=["*"]
-            )
-        )
+        lambda_role.add_to_policy(iam.PolicyStatement(
+            actions=["glue:StartJobRun", "states:StartExecution", "s3:ListBucket", "s3:GetObject"],
+            resources=["*"]
+        ))
 
         step_fn_role = iam.Role(
             self, "StepFunctionRole",
@@ -59,21 +52,15 @@ class ShyftoffPipelineStack(Stack):
         )
         silver_bucket.grant_read(step_fn_role)
         gold_bucket.grant_read_write(step_fn_role)
-        step_fn_role.add_to_policy(
-            iam.PolicyStatement(
-                actions=[
-                    "athena:StartQueryExecution",
-                    "athena:GetQueryExecution",
-                    "athena:GetQueryResults"
-                ],
-                resources=["*"]
-            )
-        )
+        step_fn_role.add_to_policy(iam.PolicyStatement(
+            actions=["athena:StartQueryExecution","athena:GetQueryExecution","athena:GetQueryResults"],
+            resources=["*"]
+        ))
 
         # -----------------------------
         # Glue Database + Table (Silver)
         # -----------------------------
-        glue_db = glue.CfnDatabase(
+        glue.CfnDatabase(
             self, "SilverDatabase",
             catalog_id=self.account,
             database_input=glue.CfnDatabase.DatabaseInputProperty(name="silver")
@@ -82,7 +69,7 @@ class ShyftoffPipelineStack(Stack):
         glue.CfnTable(
             self, "SilverParquetTable",
             catalog_id=self.account,
-            database_name=glue_db.database_input.name,
+            database_name="silver",
             table_input=glue.CfnTable.TableInputProperty(
                 name="parquet_data",
                 table_type="EXTERNAL_TABLE",
@@ -131,7 +118,7 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # Lambdas (without Step Function ARN yet)
+        # Lambdas
         # -----------------------------
         s3_to_glue_lambda = _lambda.Function(
             self, "S3ToGlueLambda",
@@ -139,7 +126,7 @@ class ShyftoffPipelineStack(Stack):
             handler="lambda_function.handler",
             code=_lambda.Code.from_asset("lambda/s3_to_glue"),
             role=lambda_role,
-            environment={"GLUE_JOB_NAME": glue_job.ref}
+            environment={"GLUE_JOB_NAME": glue_job.ref, "SILVER_BUCKET": silver_bucket.bucket_name}
         )
 
         glue_to_stepfn_lambda = _lambda.Function(
@@ -147,8 +134,7 @@ class ShyftoffPipelineStack(Stack):
             runtime=_lambda.Runtime.PYTHON_3_11,
             handler="lambda_function.handler",
             code=_lambda.Code.from_asset("lambda/glue_to_stepfn"),
-            role=lambda_role,
-            environment={"SILVER_BUCKET": silver_bucket.bucket_name}
+            role=lambda_role
         )
 
         generate_query_lambda = _lambda.Function(
@@ -160,34 +146,7 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # EventBridge Rules
-        # -----------------------------
-        events.Rule(
-            self, "CsvUploadEventRule",
-            event_pattern=events.EventPattern(
-                source=["aws.s3"],
-                detail_type=["Object Created"],
-                detail={
-                    "bucket": {"name": [bronze_bucket.bucket_name]},
-                    "object": {"key": [{"suffix": ".csv"}]}
-                }
-            )
-        ).add_target(targets.LambdaFunction(s3_to_glue_lambda))
-
-        events.Rule(
-            self, "GlueJobSuccessRule",
-            event_pattern=events.EventPattern(
-                source=["aws.glue"],
-                detail_type=["Glue Job State Change"],
-                detail={
-                    "jobName": [glue_job.ref],
-                    "state": ["SUCCEEDED"]
-                }
-            )
-        ).add_target(targets.LambdaFunction(glue_to_stepfn_lambda))
-
-        # -----------------------------
-        # Step Function Tasks
+        # Step Function
         # -----------------------------
         generate_query_task = tasks.LambdaInvoke(
             self, "GenerateAthenaQuery",
@@ -217,16 +176,41 @@ class ShyftoffPipelineStack(Stack):
             iam_resources=["*"]
         )
 
-        # -----------------------------
-        # Step Function
-        # -----------------------------
         step_fn = sfn.StateMachine(
             self, "WeeklySummaryStateMachine",
             definition=generate_query_task.next(msck_repair_task).next(athena_ctas_task),
             role=step_fn_role
         )
 
-        # Now inject Step Function ARN into Lambda
+        # Pass Step Function ARN to Lambda AFTER Step Function is created
         glue_to_stepfn_lambda.add_environment("STEP_FUNCTION_ARN", step_fn.state_machine_arn)
-        step_fn.grant_start_execution(glue_to_stepfn_lambda)
+
+        # -----------------------------
+        # EventBridge Rules (added after resources)
+        # -----------------------------
+        csv_upload_rule = events.Rule(
+            self, "CsvUploadEventRule",
+            event_pattern=events.EventPattern(
+                source=["aws.s3"],
+                detail_type=["Object Created"],
+                detail={
+                    "bucket": {"name": [bronze_bucket.bucket_name]},
+                    "object": {"key": [{"suffix": ".csv"}]}
+                }
+            )
+        )
+        csv_upload_rule.add_target(targets.LambdaFunction(s3_to_glue_lambda))
+
+        glue_job_success_rule = events.Rule(
+            self, "GlueJobSuccessRule",
+            event_pattern=events.EventPattern(
+                source=["aws.glue"],
+                detail_type=["Glue Job State Change"],
+                detail={
+                    "jobName": [glue_job.ref],
+                    "state": ["SUCCEEDED"]
+                }
+            )
+        )
+        glue_job_success_rule.add_target(targets.LambdaFunction(glue_to_stepfn_lambda))
 
