@@ -33,16 +33,11 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # IAM Roles
+        # IAM Role for Glue (existing)
         # -----------------------------
         glue_role = iam.Role.from_role_arn(
             self, "GlueRole",
             role_arn=os.environ["GLUE_ROLE_ARN"]
-        )
-
-        lambda_role = iam.Role.from_role_arn(
-            self, "LambdaRole",
-            role_arn=os.environ["LAMBDA_ROLE_ARN"]
         )
 
         # -----------------------------
@@ -72,9 +67,8 @@ class ShyftoffPipelineStack(Stack):
         lambda_fn = _lambda.Function(
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",  # matches lambda_function.py
-            code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder containing lambda_function.py
-            role=lambda_role,
+            handler="lambda_function.handler",   # file_name.function_name
+            code=_lambda.Code.from_asset("lambda/s3_to_glue"),
             environment={
                 "GLUE_JOB_NAME": glue_job.name
             },
@@ -82,17 +76,11 @@ class ShyftoffPipelineStack(Stack):
                 # Allow Lambda to start the Glue job
                 iam.PolicyStatement(
                     actions=["glue:StartJobRun"],
-                    resources=[
-                        f"arn:aws:glue:{Stack.of(self).region}:{Stack.of(self).account}:job/{glue_job.name}"
-                    ]
+                    resources=[f"arn:aws:glue:{Stack.of(self).region}:{Stack.of(self).account}:job/{glue_job.name}"]
                 ),
-                # Allow Lambda to write logs to CloudWatch
+                # Allow Lambda to write logs
                 iam.PolicyStatement(
-                    actions=[
-                        "logs:CreateLogGroup",
-                        "logs:CreateLogStream",
-                        "logs:PutLogEvents"
-                    ],
+                    actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
                     resources=["*"]
                 )
             ]
