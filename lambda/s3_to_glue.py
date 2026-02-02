@@ -19,12 +19,9 @@ def handler(event, context):
         key = detail.get("object", {}).get("key")
 
         if not bucket or not key:
-            raise ValueError("Bucket or key missing in event")
+            raise ValueError(f"Bucket or key missing in event: {json.dumps(detail)}")
 
-        if isinstance(key, list):
-            key = key[0]
-
-        logger.info(f"Starting Glue job {GLUE_JOB_NAME} for s3://{bucket}/{key}")
+        logger.info(f"Starting Glue job '{GLUE_JOB_NAME}' for s3://{bucket}/{key}")
 
         response = glue_client.start_job_run(
             JobName=GLUE_JOB_NAME,
@@ -34,15 +31,17 @@ def handler(event, context):
             }
         )
 
-        logger.info(f"Glue job started: {response['JobRunId']}")
+        # Log the full response for debugging
+        logger.info(f"Glue job started successfully: {json.dumps(response)}")
+
         return {
             "status": "success",
-            "job_run_id": response["JobRunId"],
+            "job_run_id": response.get("JobRunId"),
             "bucket": bucket,
             "key": key
         }
 
     except Exception as e:
         logger.exception("Failed to start Glue job")
-        raise e
+        raise
 
