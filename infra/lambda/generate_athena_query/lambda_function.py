@@ -5,8 +5,8 @@ def handler(event, context):
     if not parquet_paths:
         raise ValueError("No Silver parquet files provided.")
 
-    # Build UNION ALL input for multiple parquet files
-    select_statements = [f"SELECT * FROM parquet.`{path}`" for path in parquet_paths]
+    # Build UNION ALL input for multiple parquet files (single quotes around S3 paths)
+    select_statements = [f"SELECT * FROM parquet.'{path}'" for path in parquet_paths]
     union_query = " UNION ALL ".join(select_statements)
 
     ctas_query = f"""
