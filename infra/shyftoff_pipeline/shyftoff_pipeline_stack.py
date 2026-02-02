@@ -43,6 +43,9 @@ class ShyftoffPipelineStack(Stack):
             ]
         )
         scripts_bucket.grant_read(glue_role)
+        bronze_bucket.grant_read(glue_role)
+        silver_bucket.grant_read_write(glue_role)
+
         lambda_role = iam.Role(
             self, "LambdaExecutionRole",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
