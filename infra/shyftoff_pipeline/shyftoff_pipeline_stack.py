@@ -33,9 +33,8 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # IAM Roles
+        # IAM Roles (created in CDK)
         # -----------------------------
-        # Create a Glue role in this account
         glue_role = iam.Role(
             self, "GlueJobRole",
             assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
@@ -44,9 +43,20 @@ class ShyftoffPipelineStack(Stack):
             ]
         )
 
-        lambda_role = iam.Role.from_role_arn(
-            self, "LambdaRole",
-            role_arn=os.environ["LAMBDA_ROLE_ARN"]
+        lambda_role = iam.Role(
+            self, "LambdaExecutionRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole"),
+            ]
+        )
+
+        # Grant Lambda permission to start the Glue job
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["glue:StartJobRun"],
+                resources=["*"]  # Or restrict to specific job ARN if desired
+            )
         )
 
         # -----------------------------
@@ -76,11 +86,11 @@ class ShyftoffPipelineStack(Stack):
         lambda_fn = _lambda.Function(
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",  # <file_name>.<function_name>
+            handler="lambda_function.handler",   # <file_name>.<function_name>
             code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder path
             role=lambda_role,
             environment={
-                "GLUE_JOB_NAME": glue_job.ref  # use ref for CfnJob
+                "GLUE_JOB_NAME": glue_job.ref  # Use ref for CfnJob
             }
         )
 
