@@ -1,11 +1,6 @@
 import json
 
 def handler(event, context):
-    """
-    Generates an Athena CTAS query using the Glue table silver.parquet_data,
-    producing Parquet output in S3 for the gold.weekly_summary table.
-    """
-
     ctas_query = """
     CREATE TABLE IF NOT EXISTS gold.weekly_summary
     WITH (
@@ -37,7 +32,7 @@ def handler(event, context):
         SELECT
             "Extension",
             interval_start,
-            LEAST(SUM(productive_flag) * 0.5, 0.5) AS productive_hours
+            CAST(LEAST(SUM(productive_flag) * 0.5, 0.5) AS DOUBLE) AS productive_hours
         FROM intervalized
         GROUP BY "Extension", interval_start
     )
@@ -45,9 +40,6 @@ def handler(event, context):
     FROM aggregated
     ORDER BY "Extension", interval_start;
     """
-
-    # Return as JSON payload for Step Function
-    return {
-        "athena_query": ctas_query.strip()
-    }
+    
+    return {"athena_query": ctas_query.strip()}
 
