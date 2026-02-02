@@ -77,7 +77,10 @@ class ShyftoffPipelineStack(Stack):
                     "glue:GetTable",
                     "glue:GetTables",
                     "glue:GetPartition",
-                    "glue:GetPartitions"
+                    "glue:GetPartitions",
+                    "glue:CreateTable",
+                    "glue:UpdateTable",
+                    "glue:DeleteTable"
                 ],
                 resources=[
                     f"arn:aws:glue:{self.region}:{self.account}:catalog",
