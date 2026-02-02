@@ -1,18 +1,22 @@
 import json
 
 def handler(event, context):
+    """
+    Generates an Athena CTAS query to create gold.weekly_summary in Parquet format.
+    Ensures proper type casting and compression.
+    """
+
     ctas_query = """
     CREATE TABLE IF NOT EXISTS gold.weekly_summary
     WITH (
         format = 'PARQUET',
         parquet_compression = 'SNAPPY',
         external_location = 's3://shyftoff-pipeline-gold-dev/weekly_summary/'
-    )
-    AS
+    ) AS
     WITH productive_events AS (
         SELECT
-            "Extension",
-            "Done On" AS done_on,
+            "Extension" AS extension,
+            CAST("Done On" AS timestamp) AS done_on,
             CASE
                 WHEN "Action" IN ('ONLINE', 'REMVCEON') THEN 1
                 WHEN "Action" = 'OFFLINE' AND "Details" = 'Backoffice' THEN 1
@@ -22,7 +26,7 @@ def handler(event, context):
     ),
     intervalized AS (
         SELECT
-            "Extension",
+            extension,
             date_trunc('hour', done_on)
               + floor(minute(done_on) / 30) * interval '30' minute AS interval_start,
             productive_flag
@@ -30,16 +34,19 @@ def handler(event, context):
     ),
     aggregated AS (
         SELECT
-            "Extension",
+            extension,
             interval_start,
-            CAST(LEAST(SUM(productive_flag) * 0.5, 0.5) AS DOUBLE) AS productive_hours
+            CAST(LEAST(SUM(productive_flag) * 0.5, 0.5) AS double) AS productive_hours
         FROM intervalized
-        GROUP BY "Extension", interval_start
+        GROUP BY extension, interval_start
     )
     SELECT *
     FROM aggregated
-    ORDER BY "Extension", interval_start;
+    ORDER BY extension, interval_start;
     """
-    
-    return {"athena_query": ctas_query.strip()}
+
+    # Return JSON payload with the correct key for Step Functions
+    return {
+        "athena_query": ctas_query.strip()
+    }
 
