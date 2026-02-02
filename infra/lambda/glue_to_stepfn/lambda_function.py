@@ -9,7 +9,7 @@ stepfunctions = boto3.client("stepfunctions")
 SILVER_BUCKET = os.environ["SILVER_BUCKET"]
 STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
 
-def lambda_handler(event, context):
+def handler(event, context):
     """
     Triggered by Glue Job Completion.
     Finds Parquet files in SILVER_BUCKET created after Glue job start time,

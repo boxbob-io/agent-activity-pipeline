@@ -1,6 +1,6 @@
 import json
 
-def lambda_handler(event, context):
+def handler(event, context):
     parquet_paths = event.get("silver_parquet_paths", [])
     if not parquet_paths:
         raise ValueError("No Silver parquet files provided.")

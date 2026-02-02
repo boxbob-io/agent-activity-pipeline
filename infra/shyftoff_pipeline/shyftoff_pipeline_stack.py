@@ -144,8 +144,8 @@ class ShyftoffPipelineStack(Stack):
         glue_to_stepfn_lambda = _lambda.Function(
             self, "GlueToStepFnLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",  # function inside lambda_function.py
-            code=_lambda.Code.from_asset("lambda/glue_to_stepfn"),  # folder relative to infra/
+            handler="lambda_function.handler",
+            code=_lambda.Code.from_asset("lambda/glue_to_stepfn"),
             role=lambda_role,
             environment={
                 "SILVER_BUCKET": silver_bucket.bucket_name,
@@ -172,7 +172,7 @@ class ShyftoffPipelineStack(Stack):
         generate_query_lambda = _lambda.Function(
             self, "GenerateAthenaQueryLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.lambda_handler",
+            handler="lambda_function.handler",
             code=_lambda.Code.from_asset("lambda/generate_athena_query"),
             role=lambda_role
         )
