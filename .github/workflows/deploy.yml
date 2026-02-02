@@ -1,32 +1,80 @@
-name: Deploy S3 Bucket
+name: Deploy CDK Pipeline
 
 on:
   push:
     branches:
       - main
-      - dev
+  workflow_dispatch:
+
+env:
+  BRONZE_BUCKET: shyftoff-pipeline-bronze-dev
+  SILVER_BUCKET: shyftoff-pipeline-silver-dev
+  SCRIPTS_BUCKET: shyftoff-pipeline-scripts-dev
+  GLUE_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-glue-dev
+  LAMBDA_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-lambda-dev
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    permissions:
-      id-token: write
-      contents: read
+    env:
+      AWS_REGION: us-east-1
+      CDK_STACK_NAME: ShyftoffPipelineStack
+      LAMBDA_DIR: lambda
+      LAMBDA_ZIP: lambda/s3_to_glue.zip
 
     steps:
-      - uses: actions/checkout@v4
+      # 1. Checkout the repo
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      # 2. Set up Node.js (needed for CDK CLI)
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          role-to-assume: ${{ vars.AWS_ARN_DEV }}
-          aws-region: us-east-1
+          node-version: "20"
 
-      - uses: hashicorp/setup-terraform@v3
+      # 3. Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
 
-      - name: Terraform Init
-        run: terraform init
+      # 4. Install AWS CDK
+      - name: Install AWS CDK
+        run: npm install -g aws-cdk
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
+      # 5. Install Python dependencies
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 6. Configure AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 7. Zip Lambda folder
+      - name: Zip Lambda folder
+        run: |
+          if [ -d "${{ env.LAMBDA_DIR }}" ] && [ "$(ls -A ${{ env.LAMBDA_DIR }})" ]; then
+            echo "Creating Lambda zip..."
+            cd ${{ env.LAMBDA_DIR }}
+            zip -r ../s3_to_glue.zip ./*
+            cd ..
+          else
+            echo "ERROR: Lambda folder is empty!" && exit 1
+          fi
+
+      # 8. CDK Bootstrap (optional)
+      - name: CDK Bootstrap
+        run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
+
+      # 9. Deploy the CDK stack
+      - name: Deploy CDK stack
+        run: |
+          cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
+
