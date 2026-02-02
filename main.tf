@@ -133,35 +133,6 @@ resource "aws_lambda_function" "update_s3_to_glue" {
 }
 
 ########################
-# EventBridge Rule (S3 CSV Upload)
-# Assume rule already exists; import if needed
-########################
-
-data "aws_cloudwatch_event_rule" "s3_csv_upload" {
-  name = "${local.project}-s3-csv-upload-${local.env}"
-}
-
-########################
-# EventBridge Target → Lambda
-# Assume target already exists; import if needed
-########################
-
-data "aws_cloudwatch_event_target" "lambda_target" {
-  rule      = data.aws_cloudwatch_event_rule.s3_csv_upload.name
-  target_id = "S3ToGlueLambda"
-}
-
-########################
-# Lambda Permission for EventBridge
-# Assume already exists; import if needed
-########################
-
-data "aws_lambda_permission" "allow_eventbridge" {
-  function_name = data.aws_lambda_function.s3_to_glue.function_name
-  statement_id  = "AllowEventBridgeInvoke"
-}
-
-########################
 # Glue role policy to access scripts bucket
 ########################
 
