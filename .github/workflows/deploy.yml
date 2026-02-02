@@ -12,17 +12,12 @@ env:
   SILVER_BUCKET: shyftoff-pipeline-silver-dev
   SCRIPTS_BUCKET: shyftoff-pipeline-scripts-dev
   GLUE_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-glue-dev
-  LAMBDA_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-lambda-dev
+  AWS_REGION: us-east-1
+  CDK_STACK_NAME: ShyftoffPipelineStack
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    env:
-      AWS_REGION: us-east-1
-      CDK_STACK_NAME: ShyftoffPipelineStack
-      LAMBDA_DIR: lambda
-      LAMBDA_ZIP: lambda/s3_to_glue.zip
 
     steps:
       # 1. Checkout the repo
@@ -43,7 +38,7 @@ jobs:
 
       # 4. Install AWS CDK
       - name: Install AWS CDK
-        run: npm install -g aws-cdk
+        run: npm install -g aws-cdk@2
 
       # 5. Install Python dependencies
       - name: Install Python dependencies
@@ -58,24 +53,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 7. Zip Lambda folder
-      - name: Zip Lambda folder
-        run: |
-          if [ -d "${{ env.LAMBDA_DIR }}" ] && [ "$(ls -A ${{ env.LAMBDA_DIR }})" ]; then
-            echo "Creating Lambda zip..."
-            cd ${{ env.LAMBDA_DIR }}
-            zip -r ../s3_to_glue.zip ./*
-            cd ..
-          else
-            echo "ERROR: Lambda folder is empty!" && exit 1
-          fi
-
-      # 8. CDK Bootstrap (optional)
+      # 7. CDK Bootstrap (optional)
       - name: CDK Bootstrap
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
 
-      # 9. Deploy the CDK stack
+      # 8. Deploy CDK stack
       - name: Deploy CDK stack
-        run: |
-          cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
+        run: cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
 
