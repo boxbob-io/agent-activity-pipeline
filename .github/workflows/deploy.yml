@@ -1,31 +1,58 @@
+name: Deploy CDK Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+env:
+  BRONZE_BUCKET: shyftoff-pipeline-bronze-dev
+  SILVER_BUCKET: shyftoff-pipeline-silver-dev
+  SCRIPTS_BUCKET: shyftoff-pipeline-scripts-dev
+  GLUE_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-glue-dev
+  LAMBDA_ROLE_ARN: arn:aws:iam::123456789012:role/shyftoff-pipeline-lambda-dev
+  AWS_REGION: us-east-1
+  CDK_STACK_NAME: ShyftoffPipelineStack
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
 
+    steps:
+      # 1. Checkout code
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # 2. Set Python path so CDK can import your packages
       - name: Set Python path
         run: echo "PYTHONPATH=${GITHUB_WORKSPACE}/infra" >> $GITHUB_ENV
 
+      # 3. Set up Node.js (needed for CDK CLI)
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: "20"
 
+      # 4. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
+      # 5. Install AWS CDK
       - name: Install AWS CDK
         run: npm install -g aws-cdk@2
 
+      # 6. Install Python dependencies
       - name: Install Python dependencies
         working-directory: infra
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # 7. Configure AWS Credentials
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -33,19 +60,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Zip Lambda file
-        working-directory: infra/lambda
-        run: |
-          if [ -f s3_to_glue.py ]; then
-            zip ../s3_to_glue.zip s3_to_glue.py
-          else
-            echo "ERROR: Lambda file s3_to_glue.py not found!" && exit 1
-          fi
-
+      # 8. CDK Bootstrap (if first deployment)
       - name: CDK Bootstrap
         working-directory: infra
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
 
+      # 9. Deploy CDK stack
       - name: Deploy CDK stack
         working-directory: infra
         run: cdk deploy ${{ env.CDK_STACK_NAME }} --require-approval never
