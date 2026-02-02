@@ -9,6 +9,7 @@ logger.setLevel(logging.INFO)
 glue_client = boto3.client("glue")
 
 GLUE_JOB_NAME = os.environ["GLUE_JOB_NAME"]
+SILVER_BUCKET = os.environ["SILVER_BUCKET"]  # added environment variable
 
 def handler(event, context):
     logger.info(f"Received event: {json.dumps(event)}")
@@ -19,29 +20,32 @@ def handler(event, context):
         key = detail.get("object", {}).get("key")
 
         if not bucket or not key:
-            raise ValueError(f"Bucket or key missing in event: {json.dumps(detail)}")
+            raise ValueError("Bucket or key missing in event")
 
-        logger.info(f"Starting Glue job '{GLUE_JOB_NAME}' for s3://{bucket}/{key}")
+        if isinstance(key, list):
+            key = key[0]
+
+        logger.info(f"Starting Glue job {GLUE_JOB_NAME} for s3://{bucket}/{key}")
 
         response = glue_client.start_job_run(
             JobName=GLUE_JOB_NAME,
             Arguments={
-                "--s3_bucket": bucket,
-                "--s3_key": key
+                "--SOURCE_BUCKET": bucket,
+                "--SOURCE_KEY": key,
+                "--SILVER_BUCKET": SILVER_BUCKET
             }
         )
 
-        # Log the full response for debugging
-        logger.info(f"Glue job started successfully: {json.dumps(response)}")
-
+        logger.info(f"Glue job started: {response['JobRunId']}")
         return {
             "status": "success",
-            "job_run_id": response.get("JobRunId"),
-            "bucket": bucket,
-            "key": key
+            "job_run_id": response["JobRunId"],
+            "source_bucket": bucket,
+            "source_key": key,
+            "silver_bucket": SILVER_BUCKET
         }
 
     except Exception as e:
         logger.exception("Failed to start Glue job")
-        raise
+        raise e
 
