@@ -33,16 +33,11 @@ class ShyftoffPipelineStack(Stack):
         )
 
         # -----------------------------
-        # IAM Roles
+        # Glue Role (existing)
         # -----------------------------
         glue_role = iam.Role.from_role_arn(
             self, "GlueRole",
             role_arn=os.environ["GLUE_ROLE_ARN"]
-        )
-
-        lambda_role = iam.Role.from_role_arn(
-            self, "LambdaRole",
-            role_arn=os.environ["LAMBDA_ROLE_ARN"]
         )
 
         # -----------------------------
@@ -72,12 +67,27 @@ class ShyftoffPipelineStack(Stack):
         lambda_fn = _lambda.Function(
             self, "S3ToGlueLambda",
             runtime=_lambda.Runtime.PYTHON_3_11,
-            handler="lambda_function.handler",   # <file_name>.<function_name>
-            code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder path
-            role=lambda_role,
+            handler="s3_to_glue.handler",  # file_name.function_name
+            code=_lambda.Code.from_asset("lambda"),  # folder containing s3_to_glue.py
             environment={
                 "GLUE_JOB_NAME": glue_job.name
-            }
+            },
+            initial_policy=[
+                # Allow Lambda to start the Glue job
+                iam.PolicyStatement(
+                    actions=["glue:StartJobRun"],
+                    resources=[glue_job.attr_arn]
+                ),
+                # Allow Lambda to write logs to CloudWatch
+                iam.PolicyStatement(
+                    actions=[
+                        "logs:CreateLogGroup",
+                        "logs:CreateLogStream",
+                        "logs:PutLogEvents"
+                    ],
+                    resources=["*"]
+                )
+            ]
         )
 
         # -----------------------------
