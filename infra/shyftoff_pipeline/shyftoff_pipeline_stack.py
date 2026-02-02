@@ -69,16 +69,16 @@ class ShyftoffPipelineStack(Stack):
         # -----------------------------
         # Lambda to trigger Glue
         # -----------------------------
-		lambda_fn = _lambda.Function(
-			self, "S3ToGlueLambda",
-			runtime=_lambda.Runtime.PYTHON_3_11,
-			handler="lambda_function.handler",   # <file_name>.<function_name>
-			code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder path
-			role=lambda_role,
-			environment={
-				"GLUE_JOB_NAME": glue_job.name
-			}
-		)
+        lambda_fn = _lambda.Function(
+            self, "S3ToGlueLambda",
+            runtime=_lambda.Runtime.PYTHON_3_11,
+            handler="lambda_function.handler",   # <file_name>.<function_name>
+            code=_lambda.Code.from_asset("lambda/s3_to_glue"),  # folder path
+            role=lambda_role,
+            environment={
+                "GLUE_JOB_NAME": glue_job.name
+            }
+        )
 
         # -----------------------------
         # EventBridge Rule for S3 CSV upload
