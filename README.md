@@ -1,8 +1,8 @@
 # Agent Activity ETL Pipeline
 
 ## TL;DR
-If you'd like to skip directly to the sql used to resolve problem #1 you can view the main transformation logic: [`infra/lambda/generate_athena_query/weekly_summary.sql`](infra/lambda/generate_athena_query/weekly_summary.sql)
-My description to resolve problem #2 can be found in this README under [`Architecture: Part Two (Proposed)`](#architecture-part-two-proposed).
+- If you'd like to skip directly to the sql used to resolve problem #1 you can view the main transformation logic: [`infra/lambda/generate_athena_query/weekly_summary.sql`](infra/lambda/generate_athena_query/weekly_summary.sql)
+- My description to resolve problem #2 can be found in this README under [`Architecture: Part Two (Proposed)`](#architecture-part-two-proposed).
 
 ## Overview
 This repository contains an event-driven ETL and analytics pipeline for agent activity data. Raw CSV uploads are transformed to Parquet and aggregated into weekly summaries via SQL, using a serverless AWS stack provisioned with AWS CDK. The implementation emphasizes clear separation of data layers, operational reliability, and easy redeployments.
