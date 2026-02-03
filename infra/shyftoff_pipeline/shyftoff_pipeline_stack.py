@@ -257,7 +257,10 @@ class ShyftoffPipelineStack(Stack):
             output_path="$.Payload",
         )
 
-        athena_output = f"s3://{gold_bucket.bucket_name}/athena/"
+        athena_output = s3.Location(
+            bucket_name=gold_bucket.bucket_name,
+            object_key="athena/",
+        )
 
         msck_repair_task = tasks.AthenaStartQueryExecution(
             self,
