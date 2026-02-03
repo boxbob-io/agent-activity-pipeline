@@ -69,7 +69,7 @@ calc_durations AS (
 ), grouped_events AS (
     SELECT
         Extension,
-        interval_start as Interval,
+        interval_start,
         CAST(
             LEAST(
                 SUM(CASE WHEN productive_flag = 1 THEN productive_seconds ELSE 0 END) / 3600.0,
