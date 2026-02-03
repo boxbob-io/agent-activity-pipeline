@@ -257,51 +257,35 @@ class ShyftoffPipelineStack(Stack):
             output_path="$.Payload",
         )
 
-        msck_repair_task = tasks.CallAwsService(
+        athena_output = f"s3://{gold_bucket.bucket_name}/athena/"
+
+        msck_repair_task = tasks.AthenaStartQueryExecution(
             self,
             "MSCKRepairSilverTable",
-            service="athena",
-            action="startQueryExecution",
-            parameters={
-                "QueryString": "MSCK REPAIR TABLE silver.parquet_data",
-                "ResultConfiguration": {
-                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
-                },
-            },
-            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
-            iam_resources=["*"],
+            query_string="MSCK REPAIR TABLE silver.parquet_data",
+            query_execution_context=tasks.QueryExecutionContext(database_name="silver"),
+            result_configuration=tasks.ResultConfiguration(output_location=athena_output),
+            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
             result_path="$.msck_result",
         )
 
-        drop_weekly_table_task = tasks.CallAwsService(
+        drop_weekly_table_task = tasks.AthenaStartQueryExecution(
             self,
             "DropWeeklySummaryTable",
-            service="athena",
-            action="startQueryExecution",
-            parameters={
-                "QueryString": "DROP TABLE IF EXISTS gold.weekly_summary",
-                "ResultConfiguration": {
-                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/athena/"
-                },
-            },
-            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
-            iam_resources=["*"],
+            query_string="DROP TABLE IF EXISTS gold.weekly_summary",
+            query_execution_context=tasks.QueryExecutionContext(database_name="gold"),
+            result_configuration=tasks.ResultConfiguration(output_location=athena_output),
+            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
             result_path="$.drop_result",
         )
 
-        athena_ctas_task = tasks.CallAwsService(
+        athena_ctas_task = tasks.AthenaStartQueryExecution(
             self,
             "RunAthenaCTAS",
-            service="athena",
-            action="startQueryExecution",
-            parameters={
-                "QueryString.$": "$.athena_query",
-                "ResultConfiguration": {
-                    "OutputLocation": f"s3://{gold_bucket.bucket_name}/weekly_summary/"
-                },
-            },
-            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
-            iam_resources=["*"],
+            query_string=sfn.JsonPath.string_at("$.athena_query"),
+            query_execution_context=tasks.QueryExecutionContext(database_name="gold"),
+            result_configuration=tasks.ResultConfiguration(output_location=athena_output),
+            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
             result_path="$.ctas_result",
         )
 
