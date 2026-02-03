@@ -23,9 +23,9 @@ This portion is described but not implemented. It adds a notification service fo
 
 ### Proposed Behavior
 - A `check-summary` Lambda validates the prior 24 hours of data.
-- It counts expected intervals and flags gaps (anything fewer than 48 half-hour intervals).
-- The check runs on a daily schedule and can would be triggered by a custom job after the step function from the transformation load completes (successfully or otherwise).
-- An SNS topic fans out notifications to downstream handlers (email, Slack, pigeons, etc.) via a single notifications lambda router.
+- It counts expected intervals and flags gaps (anything fewer than 48 half-hour intervals triggers a notification).
+- The check runs on both a daily schedule to catch failures to run outside of the expected SLA and would be triggered by a custom job after the step function from the transformation load completes (successfully or otherwise). This would cover both gaps within the intervals and gaps in data loads altogether. 
+- An SNS topic fans out notifications to downstream handlers (email, Slack, sms, etc.) via a single notifications lambda router.
 
 ## Stack
 - AWS CDK (Python)
