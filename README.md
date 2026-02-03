@@ -1,21 +1,69 @@
 # Agent Activity ETL Pipeline
 
 ## Overview
+This repository contains an event-driven ETL and analytics pipeline for agent activity data. Raw CSV uploads are transformed to Parquet and aggregated into weekly summaries via SQL, using a serverless AWS stack provisioned with AWS CDK. The implementation emphasizes clear separation of data layers, operational reliability, and easy redeployments.
 
-This is an automated data pipeline to serve as the ETL and analytics backbone agent event data. Built on AWS CDK, it is triggered on the ingestion of raw CSV data, transforms it into Parquet format, and aggregates it into weekly summaries for reporting and analysis. The pipeline uses several AWS services such as S3, Glue, Lambda, Step Functions, Athena, and EventBridge to ensure a seamless event-driven workflow. All AWS resources are managed by the AWS CDK stack and can be re-deployed at any time via GitHub action.
+Part one of the pipeline is fully implemented. Part two documents the design of a proposed notification service and has not been implemented. I will separate the architecture documentation into two parts to keep with the problem prompt.
 
-*This problem statement was broken into two parts, I'll separate the architectures accordingly.*
-
-## Architecture : Part One
-The goal of this process is to generate a transformed version of the agent event data using SQL from an ingested CSV file. My secondary goal was to ensure that this is a _nearly_ production ready pipeline that will scale nicely given more dramatically sized agent event datasets.
+## Architecture: Part One (Implemented)
+The core pipeline ingests CSV files, converts them to Parquet, and produces weekly rollups for analytics.
 
 ![Pipeline One](images/shyftoff_pipeline_one.png)
 
+### Data Flow (Part One)
+1. A CSV file is uploaded to the Bronze S3 bucket.
+2. An EventBridge rule triggers `s3_to_glue` Lambda.
+3. The Lambda starts a Glue job that converts the ingested CSV to Parquet and writes to the Silver bucket, without any other transformations.
+4. Step Functions run Athena to repair the Silver table metadata with the newly appended Parquet files. Athena is also used to run the transformation SQL and update the Gold weekly summary table accordingly.
 
+## Architecture: Part Two (Proposed)
+This portion is described but not implemented. It adds a notification service for missing data in the summary table over a 24-hour window.
 
-## Architecture : Part Two
-This is the portion of the process that has not yet been implemented, as the problem statement suggested the _description_ of a notification service that would notify of missing data in the summary table for a 24 hour window.
+![Pipeline Two](images/notification_service_two.png)
 
-![Pipeline One](images/notification_service_two.png)
+### Proposed Behavior
+- A `check-summary` Lambda validates the prior 24 hours of data.
+- It counts expected intervals and flags gaps (anything fewer than 48 half-hour intervals).
+- The check runs on a daily schedule and can would be triggered by a custom job after the step function from the transformation load completes (successfully or otherwise).
+- An SNS topic fans out notifications to downstream handlers (email, Slack, pigeons, etc.) via a single notifications lambda router.
 
-The proposed extension here would serve both for this implementation and any further notifications that we would like to extend to cover. As proposed, there would be a lambda we'll call "check-summary-lambda". This lambda would be tasked with validating the previous day's event data. I imagine that the simplest validation method for identifying gaps within intervals that don't exist would be with a simple count of the distinct intervals where the values are within the provided 24 hour window (either the last 24 hours from now or yesterday); this resolves two problems simultaneoously, any missing intervals would flagged, as well as failures to load altogether; anything less than 48 intervals is worth notifying. Check-summary-lambda would be triggered from two places, a cron scheduled eventbridge and a custom put event triggered at the end of the insert process described in the first part. Our cron would be scheduled to run daily just outside of the expected SLA of our first event process. This lambda. if anyhting is found out of the ordinary would send a message to an SNS queeue, which would in turn trigger a lambda to do the actual notification.
+## Stack
+- AWS CDK (Python)
+- S3 (Bronze/Silver/Gold storage layers)
+- Glue (CSV to Parquet)
+- Lambda (ingestion trigger and orchestration helpers)
+- Step Functions (workflow orchestration)
+- Athena (SQL transforms + aggregations)
+- EventBridge (ingestion triggers and schedules)
+
+## Repository Layout
+- `infra/` CDK app and infrastructure code
+- `infra/glue/` Glue job script(s)
+- `infra/lambda/` Lambda function(s)
+- `images/` Architecture diagrams
+- `problem_requirements/` Original problem statement and inputs
+
+## Configuration
+The GitHub Actions workflow uses the following environment variables for deployment:
+- `BRONZE_BUCKET`
+- `SILVER_BUCKET`
+- `GOLD_BUCKET`
+- `SCRIPTS_BUCKET`
+- `GLUE_ROLE_ARN`
+- `LAMBDA_ROLE_ARN`
+- `AWS_REGION`
+- `CDK_STACK_NAME`
+
+See `.github/workflows/deploy.yml` for the full deployment pipeline and required secrets.
+
+## Deployment
+Deployments are handled via GitHub Actions on push to `main` or `dev`, or via manual dispatch. The workflow:
+1. Installs CDK + Python dependencies.
+2. Uploads the Glue script to S3.
+3. Bootstraps CDK (if needed).
+4. Deploys the stack.
+
+If you want to deploy locally, follow the same steps in the workflow under `.github/workflows/deploy.yml`.
+
+## Notes
+This repository is designed to be redeployable and environment-agnostic. Buckets and IAM roles are injected at deploy time to keep infrastructure flexible across dev and prod environments.

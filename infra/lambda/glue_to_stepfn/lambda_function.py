@@ -1,10 +1,15 @@
-import os
-import boto3
 import json
+import logging
+import os
+
+import boto3
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 stepfunctions = boto3.client("stepfunctions")
-
 STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
+
 
 def handler(event, context):
     """
@@ -14,7 +19,7 @@ def handler(event, context):
       2. Builds Gold tables via Athena
     """
 
-    print("Received event:", json.dumps(event, indent=2))
+    logger.info("Received event: %s", json.dumps(event, indent=2))
 
     detail = event.get("detail", {})
     glue_job_run_id = detail.get("jobRunId")
@@ -22,18 +27,17 @@ def handler(event, context):
 
     input_payload = {
         "glue_job_run_id": glue_job_run_id,
-        "job_name": job_name
+        "job_name": job_name,
     }
 
     response = stepfunctions.start_execution(
         stateMachineArn=STEP_FUNCTION_ARN,
-        input=json.dumps(input_payload)
+        input=json.dumps(input_payload),
     )
 
-    print(f"Started Step Function execution: {response['executionArn']}")
+    logger.info("Started Step Function execution: %s", response["executionArn"])
 
     return {
         "status": "started",
-        "step_function_execution_arn": response["executionArn"]
+        "step_function_execution_arn": response["executionArn"],
     }
-
