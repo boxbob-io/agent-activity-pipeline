@@ -34,6 +34,13 @@ intervaled_events AS (
           + floor(minute(done_on) / 30) * interval '30' minute AS interval_start,
         date_trunc('hour', done_on)
           + (floor(minute(done_on) / 30) + 1) * interval '30' minute AS interval_end,
+        date_diff(
+            'second',
+            date_trunc('hour', done_on)
+              + floor(minute(done_on) / 30) * interval '30' minute,
+            date_trunc('hour', done_on)
+              + (floor(minute(done_on) / 30) + 1) * interval '30' minute
+        ) AS interval_length_seconds,
         done_on,
         COALESCE(
             next_done_on,
@@ -48,6 +55,7 @@ calc_durations AS (
         Extension,
         interval_start,
         interval_end,
+        interval_length_seconds,
         productive_flag,
         GREATEST(
             0,
@@ -65,7 +73,7 @@ calc_durations AS (
         CAST(
             LEAST(
                 SUM(CASE WHEN productive_flag = 1 THEN productive_seconds ELSE 0 END) / 3600.0,
-                date_diff('second', interval_start, interval_end) / 3600.0
+                MAX(interval_length_seconds) / 3600.0
             ) AS double
         ) AS productive_hours
     FROM calc_durations
