@@ -44,6 +44,7 @@ df = (
 )
 
 done_on_ts = to_timestamp(col("`Done On`"))
+df = df.withColumn("Done On", done_on_ts)
 df = df.withColumn("date", to_date(done_on_ts))
 
 df = (
