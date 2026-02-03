@@ -1,5 +1,9 @@
 # Agent Activity ETL Pipeline
 
+## TL;DR
+If you'd like to skip directly to the sql used to resolve problem #1 you can view the main transformation logic: [`infra/lambda/generate_athena_query/weekly_summary.sql`](infra/lambda/generate_athena_query/weekly_summary.sql)
+My description to resolve problem #2 can be found in this README under [`Architecture: Part Two (Proposed)`](#architecture-part-two-proposed).
+
 ## Overview
 This repository contains an event-driven ETL and analytics pipeline for agent activity data. Raw CSV uploads are transformed to Parquet and aggregated into weekly summaries via SQL, using a serverless AWS stack provisioned with AWS CDK. The implementation emphasizes clear separation of data layers, operational reliability, and easy redeployments.
 
@@ -16,7 +20,7 @@ The core pipeline ingests CSV files, converts them to Parquet, and produces week
 3. The Lambda starts a Glue job that converts the ingested CSV to Parquet and writes to the Silver bucket, without any other transformations.
 4. Step Functions run Athena to repair the Silver table metadata with the newly appended Parquet files. Athena is also used to run the transformation SQL and update the Gold weekly summary table accordingly.
 
-## Architecture: Part Two (Proposed)
+## [Architecture: Part Two (Proposed)](#architecture-part-two-proposed)
 This portion is described but not implemented. It adds a notification service for missing data in the summary table over a 24-hour window.
 
 ![Pipeline Two](images/notification_service_two.png)

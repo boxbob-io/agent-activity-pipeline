@@ -15,6 +15,7 @@ args = getResolvedOptions(
 
 input_path = f"s3://{args['SOURCE_BUCKET']}/{args['SOURCE_KEY']}"
 output_path = f"s3://{args['SILVER_BUCKET']}/data/"
+bad_records_path = f"s3://{args['SILVER_BUCKET']}/bad_records/"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -39,6 +40,11 @@ schema = StructType(
 df = (
     spark.read
     .option("header", "true")
+    .option("quote", '"')
+    .option("escape", '"')
+    .option("multiLine", "true")
+    .option("mode", "DROPMALFORMED")
+    .option("badRecordsPath", bad_records_path)
     .schema(schema)
     .csv(input_path)
 )
